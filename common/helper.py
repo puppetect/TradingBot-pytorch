@@ -22,7 +22,7 @@ def calc_loss(batch, net, tgt_net, gamma, device='cpu'):
     state_action_values = net(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
 
     last_state_actions = net(last_states_v).max(1)[1]
-    last_state_values = tgt_net(last_states_v).gather(1, last_state_actions.unsqueeze(-1)).squeeze(-1)
-    last_state_values[dones_v] = 0.0
-    expected_state_action_values = last_state_values.detach() * gamma + rewards_v
+    last_state_action_values = tgt_net(last_states_v).gather(1, last_state_actions.unsqueeze(-1)).squeeze(-1)
+    last_state_action_values[dones_v] = 0.0
+    expected_state_action_values = last_state_action_values.detach() * gamma + rewards_v
     return nn.MSELoss()(state_action_values, expected_state_action_values)

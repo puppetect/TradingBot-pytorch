@@ -15,17 +15,20 @@ class ExperienceSource:
         self.gamma = gamma
         self.steps_count = steps_count
         self.episode_reward = None
+        self.episode_step = None
 
     def __iter__(self):
         state = self.env.reset()
         exp = collections.deque(maxlen=self.steps_count)
         total_reward = 0.0
+        total_step = 0
 
         while True:
-            action = self.agent(state)
-            next_state, reward, is_done, _ = self.env.step(action)
+            action_idx = self.agent([state])
+            next_state, reward, is_done, _ = self.env.step(action_idx)
             total_reward += reward
-            step = Step(state=state, action=action,
+            total_step += 1
+            step = Step(state=state, action=action_idx,
                         reward=reward, done=is_done)
             exp.append(step)
             if len(exp) == self.steps_count:
@@ -34,7 +37,7 @@ class ExperienceSource:
                 for e in reversed(exp):
                     sum_reward *= self.gamma
                     sum_reward += e.reward
-                yield Experience(state=exp[0].state, action=exp[0].action,
+                yield Experience(state=exp[0].state, action=exp[0].action_idx,
                                  reward=sum_reward, last_state=last_state)
             state = next_state
             if is_done:
@@ -43,10 +46,11 @@ class ExperienceSource:
                 state = self.env.reset()
                 exp.clear()
 
-    def pop_episode_reward(self):
-        res = self.episode_reward
+    def pop_episode_result(self):
+        res = (self.episode_reward, self.episode_step)
         if res:
             self.episode_reward = None
+            self.episode_step = None
         return res
 
 

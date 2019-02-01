@@ -48,7 +48,7 @@ class State:
             self.have_position = False
 
         self.offset += 1
-        tmr_close = self.prices.ix[self.offset, 'close']
+        tmr_close = self._close()
         if self.have_position:
             reward += 100 * (tmr_close - close) / close
         done |= self.offset >= len(self.prices) - 1

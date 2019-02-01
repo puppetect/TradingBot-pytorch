@@ -70,7 +70,8 @@ exp_source = experience.ExperienceSource(env, agent, GAMMA, steps_count=REWARD_S
 buffer = experience.ExperienceBuffer(exp_source, REPLAY_SIZE)
 optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
 
-total_rewards = []
+total_reward = []
+total_steps = []
 frame_idx = 0
 frame_prev = 0
 ts = time.time()
@@ -81,21 +82,24 @@ best_mean_reward = None
 while True:
     frame_idx += 1
     buffer.populate(1)
-    agent.epsilon = max(EPSILON_FINAL,
-                        EPSILON_START - frame_idx / EPSILON_STEPS)
-    reward = exp_source.pop_episode_reward()
+    agent.epsilon = max(EPSILON_FINAL, EPSILON_START - frame_idx / EPSILON_STEPS)
+    reward, steps = exp_source.pop_episode_result()
     if reward:
-        total_rewards.append(reward)
+        total_reward.append(reward)
+        total_steps.append(steps)
         speed = (frame_idx - frame_prev) / (time.time() - ts)
         frame_prev = frame_idx
         ts = time.time()
-        mean_reward = np.mean(total_rewards[-100:])
+        mean_reward = np.mean(total_reward[-100:])
+        mean_step = np.mean(total_steps[-100:])
         logger.info('%d done %d games, mean reward %.3f, epsilon %.2f, speed %.2f f/s'
-                    % (frame_idx, len(total_rewards), mean_reward, agent.epsilon, speed))
+                    % (frame_idx, len(total_reward), mean_reward, agent.epsilon, speed))
         writer.add_scalar('epsilon', agent.epsilon, frame_idx)
         writer.add_scalar('speed', speed, frame_idx)
-        writer.add_scalar('mean_reward', mean_reward, frame_idx)
         writer.add_scalar('reward', reward, frame_idx)
+        writer.add_scalar('reward_100', mean_reward, frame_idx)
+        writer.add_scalar('steps', steps, frame_idx)
+        writer.add_scalar('steps_100', mean_step, frame_idx)
 
     if len(buffer) < REPLAY_INITIAL:
         continue
@@ -115,12 +119,12 @@ while True:
             mean_vals.append(best_action_values_v.mean().item())
         mean_val = np.mean(mean_vals)
         writer.add_scalar('values_mean', mean_val, frame_idx)
-        if best_mean_reward is None or best_mean_reward + 0.002 < mean_reward:
-            torch.save(net.state_dict(), os.path.join(save_path, 'best_mean_reward.pt'))
-            if best_mean_reward is not None:
-                logger.info('Best mean reward update %.3f -> %.3f'
-                            % (best_mean_reward, mean_reward))
-            best_mean_reward = mean_reward
+        if best_mean_val is None or best_mean_val < mean_val:
+            torch.save(net.state_dict(), os.path.join(save_path, 'best_mean_val.pt'))
+            if best_mean_val is not None:
+                logger.info('Best mean value updated %.3f -> %.3f'
+                            % (best_mean_val, mean_val))
+            best_mean_val = mean_val
 
     optimizer.zero_grad()
     batch = buffer.sample(BATCH_SIZE)
