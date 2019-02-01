@@ -1,4 +1,5 @@
 import collections
+import numpy as np
 
 
 Step = collections.namedtuple('Step', 'state, action, reward, done')
@@ -22,7 +23,7 @@ class ExperienceSource:
 
         while True:
             action = self.agent(state)
-            next_state, reward, is_done, _ = env.step(action)
+            next_state, reward, is_done, _ = self.env.step(action)
             total_reward += reward
             step = Step(state=state, action=action,
                         reward=reward, done=is_done)

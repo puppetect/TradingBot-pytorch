@@ -1,11 +1,12 @@
 from lib import data, environ, models
-from common import agent, experience, loss
+from common import agent, experience, calc
 from datetime import datetime
 import os
 import time
 import logging
 import gym
 import numpy as np
+import pandas as pd
 import torch
 import torch.optim as optim
 
@@ -31,6 +32,7 @@ EPSILON_FINAL = 0.1
 EPSILON_STEPS = 1000000
 
 device = 'cuda'
+google_colab = True
 datestr = datetime.strftime(datetime.now(), '%Y-%m-%d-%H-%M-%S')
 save_path = os.path.join('saves', datestr)
 os.makedirs(save_path, exist_ok=True)
@@ -41,7 +43,13 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s',
                     handlers=[logging.FileHandler(os.path.join(save_path, 'console.log')),
                               logging.StreamHandler()])
 
-stock_data = data.read_csv(file_name=DEFAULT_FILE)
+
+if google_colab:
+    stock_data = (pd.read_csv('adhoc/prices.csv', index_col=0),
+                  pd.read_csv('adhoc/factors.csv', index_col=0))
+else:
+    stock_data = data.read_csv(file_name=DEFAULT_FILE)
+
 env = environ.StockEnv(stock_data, bars_count=BARS_COUNT)
 env = gym.wrappers.TimeLimit(env, max_episode_steps=1000)
 writer = SummaryWriter(comment='-stock-dqconv-')
@@ -98,7 +106,7 @@ while True:
             mean_vals.append(best_action_values_v.mean().item())
         mean_val = np.mean(mean_vals)
         writer.add_scalar('values_mean', mean_val, frame_idx)
-        if best_mean_reward is None or best_mean_reward < mean_reward:
+        if best_mean_reward is None or best_mean_reward + 0.005 < mean_reward:
             torch.save(net.state_dict(), os.path.join(save_path, 'mean_val-%.3f.data' % mean_val))
             if best_mean_reward is not None:
                 logger.info('Best mean reward update %.3f -> %.3f'
@@ -107,7 +115,7 @@ while True:
 
     optimizer.zero_grad()
     batch = buffer.sample(BATCH_SIZE)
-    loss = loss.calc_loss(batch, net, tgt_net, GAMMA**REWARD_STEPS, device=device)
+    loss = calc.calc_loss(batch, net, tgt_net, GAMMA**REWARD_STEPS, device=device)
     loss.backward()
     optimizer.step()
 
