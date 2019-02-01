@@ -37,12 +37,14 @@ class ExperienceSource:
                 for e in reversed(exp):
                     sum_reward *= self.gamma
                     sum_reward += e.reward
-                yield Experience(state=exp[0].state, action=exp[0].action_idx,
+                yield Experience(state=exp[0].state, action=exp[0].action,
                                  reward=sum_reward, last_state=last_state)
             state = next_state
             if is_done:
                 self.episode_reward = total_reward
+                self.episode_step = total_step
                 total_reward = 0.0
+                total_step = 0
                 state = self.env.reset()
                 exp.clear()
 

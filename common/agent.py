@@ -11,7 +11,7 @@ class EpsilonGreedyAgent:
 
     def __call__(self, state):
         if np.random.random() < self.epsilon:
-            action = self.env.action_space.sample()
+            action_idx = self.env.action_space.sample()
         else:
             state_a = np.array(state, copy=False)
             state_v = torch.tensor(state_a).to(self.device)

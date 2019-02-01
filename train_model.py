@@ -1,4 +1,4 @@
-from lib import data, environ, models, validation
+from lib import environ, models, validation
 from common import agent, experience, helper
 from datetime import datetime
 import os
@@ -15,8 +15,7 @@ from tensorboardX import SummaryWriter
 
 BATCH_SIZE = 32
 BARS_COUNT = 100
-DEFAULT_FILE = 'data/000001_2017.csv'
-DEFAULT_VAL_FILE = 'data/000001_2018.csv'
+REWARD_GROUPS = 100
 
 GAMMA = 0.9
 REPLAY_SIZE = 100000
@@ -35,7 +34,7 @@ EPSILON_STEPS = 1000000
 
 
 device = 'cuda'
-local_runtime = True
+run_local = False
 datestr = datetime.strftime(datetime.now(), '%Y-%m-%d-%H-%M-%S')
 save_path = os.path.join('saves', datestr)
 os.makedirs(save_path, exist_ok=True)
@@ -47,21 +46,28 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s',
                               logging.StreamHandler()])
 
 
-if local_runtime:
-    train_data = data.read_csv(file_name=DEFAULT_FILE)
-    val_data = data.read_csv(file_name=DEFAULT_VAL_FILE)
+if run_local:
+    try:
+        from lib import data
+        train_data = data.read_csv(file_name='data/000001_2017.csv')
+        val_data = data.read_csv(file_name='data/000001_2018.csv')
+    except ModuleNotFoundError:
+        pass
 else:
-    train_data = (pd.read_csv('prices_2017.csv', index_col=0),
-                  pd.read_csv('factors_2017.csv', index_col=0))
-    val_data = (pd.read_csv('prices_2018.csv', index_col=0),
-                pd.read_csv('factors_2018.csv', index_col=0))
+    train_data = (pd.read_csv('data/prices_2017.csv', index_col=0),
+                  pd.read_csv('data/factors_2017.csv', index_col=0))
+    val_data = (pd.read_csv('data/prices_2018.csv', index_col=0),
+                pd.read_csv('data/factors_2018.csv', index_col=0))
 
-env = environ.StockEnv(train_data, bars_count=BARS_COUNT)
+env = environ.StockEnv(train_data, bars_count=BARS_COUNT, reset_on_close=True)
 env = gym.wrappers.TimeLimit(env, max_episode_steps=1000)
-env_test = environ.StocksEnv(train_data, bars_count=BARS_COUNT)
-env_val = environ.StocksEnv(val_data, bars_count=BARS_COUNT)
+env_test = environ.StockEnv(train_data, bars_count=BARS_COUNT, reset_on_close=True)
+env_test = gym.wrappers.TimeLimit(env_test, max_episode_steps=1000)
+env_val = environ.StockEnv(val_data, bars_count=BARS_COUNT, reset_on_close=True)
+env_val = gym.wrappers.TimeLimit(env_val, max_episode_steps=1000)
 
-writer = SummaryWriter(comment='-stock-dqconv-')
+writer = SummaryWriter(comment='-stock-dqconv-', flush_secs=60)
+
 net = models.DQNConv1d(env.observation_space.shape, env.action_space.n).to(device)
 tgt_net = models.DQNConv1d(env.observation_space.shape, env.action_space.n).to(device)
 
@@ -72,19 +78,29 @@ optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
 
 total_reward = []
 total_steps = []
+reward_buf = []
+steps_buf = []
 frame_idx = 0
 frame_prev = 0
-ts = time.time()
+start_time = ts = time.time()
 
 eval_states = None
-best_mean_reward = None
+best_mean_val = None
 
 while True:
     frame_idx += 1
     buffer.populate(1)
     agent.epsilon = max(EPSILON_FINAL, EPSILON_START - frame_idx / EPSILON_STEPS)
-    reward, steps = exp_source.pop_episode_result()
-    if reward:
+    ep_reward, ep_steps = exp_source.pop_episode_result()
+    if ep_reward:
+        reward_buf.append(ep_reward)
+        steps_buf.append(ep_steps)
+        if len(reward_buf) < REWARD_GROUPS:
+            continue
+        reward = np.mean(reward_buf)
+        steps = np.mean(steps_buf)
+        reward_buf.clear()
+        steps_buf.clear()
         total_reward.append(reward)
         total_steps.append(steps)
         speed = (frame_idx - frame_prev) / (time.time() - ts)
@@ -92,8 +108,7 @@ while True:
         ts = time.time()
         mean_reward = np.mean(total_reward[-100:])
         mean_step = np.mean(total_steps[-100:])
-        logger.info('%d done %d games, mean reward %.3f, epsilon %.2f, speed %.2f f/s'
-                    % (frame_idx, len(total_reward), mean_reward, agent.epsilon, speed))
+        logger.info('%d done %d games, mean reward %.3f, mean step %d, epsilon %.2f, speed %.2f f/s' % (frame_idx, len(total_reward), mean_reward, mean_step, agent.epsilon, speed))
         writer.add_scalar('epsilon', agent.epsilon, frame_idx)
         writer.add_scalar('speed', speed, frame_idx)
         writer.add_scalar('reward', reward, frame_idx)
@@ -142,5 +157,9 @@ while True:
         res = validation.run_val(env_val, net, device=device)
         for key, val in res.items():
             writer.add_scalar(key + '_val', val, frame_idx)
+
+    # 8h training time on google colab
+    if time.time() - start_time > 28800:
+        break
 
 writer.close()
