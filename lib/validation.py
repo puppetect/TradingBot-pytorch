@@ -1,9 +1,10 @@
 import numpy as np
 import torch
 from lib import environ
+import logging
 
 
-def run_val(env, net, episodes=100, device='cpu', epsilon=0.02, commission=0.00025):
+def run_val(env, net, episodes=100, device='cpu', epsilon=0.02):
     stats = {'episode_rewards': [],
              'episode_steps': []}
 
@@ -28,5 +29,6 @@ def run_val(env, net, episodes=100, device='cpu', epsilon=0.02, commission=0.000
 
         stats['episode_rewards'].append(total_reward)
         stats['episode_steps'].append(total_step)
+        logging
 
     return {key: np.mean(vals) for key, vals in stats.items()}

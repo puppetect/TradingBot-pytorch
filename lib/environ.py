@@ -41,10 +41,10 @@ class State:
         done = False
         close = self._close()
         if action == Actions.buy and not self.have_position:
-            reward -= self.commission
+            reward -= self.commission * 100
             self.have_position = True
         if action == Actions.sell and self.have_position:
-            reward -= self.commission
+            reward -= self.commission * 100
             done |= self.reset_on_close
             self.have_position = False
 

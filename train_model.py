@@ -10,7 +10,7 @@ import pandas as pd
 import torch
 import torch.optim as optim
 
-from tensorboardX import SummaryWriter
+from common.writer import SummaryWriter
 
 
 BATCH_SIZE = 32
@@ -46,14 +46,11 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s',
                               logging.StreamHandler()])
 
 
-if run_local:
-    try:
-        from lib import data
-        train_data = data.read_csv(file_name='data/000001_2017.csv')
-        val_data = data.read_csv(file_name='data/000001_2018.csv')
-    except ModuleNotFoundError:
-        pass
-else:
+try:
+    from lib import data
+    train_data = data.read_csv(file_name='data/000001_2017.csv')
+    val_data = data.read_csv(file_name='data/000001_2018.csv')
+except ModuleNotFoundError:
     train_data = (pd.read_csv('data/prices_2017.csv', index_col=0),
                   pd.read_csv('data/factors_2017.csv', index_col=0))
     val_data = (pd.read_csv('data/prices_2018.csv', index_col=0),
@@ -66,7 +63,7 @@ env_test = gym.wrappers.TimeLimit(env_test, max_episode_steps=1000)
 env_val = environ.StockEnv(val_data, bars_count=BARS_COUNT, reset_on_close=True)
 env_val = gym.wrappers.TimeLimit(env_val, max_episode_steps=1000)
 
-writer = SummaryWriter(comment='-stock-dqconv-', flush_secs=60)
+writer = SummaryWriter('runs')
 
 net = models.DQNConv1d(env.observation_space.shape, env.action_space.n).to(device)
 tgt_net = models.DQNConv1d(env.observation_space.shape, env.action_space.n).to(device)
