@@ -39,7 +39,7 @@ class State:
     def step(self, action):
         reward = 0
         done = False
-        close = self.prices.ix[self.offset, 'close']
+        close = self._close()
         if action == Actions.buy and not self.have_position:
             reward -= self.commission
             self.have_position = True
@@ -53,6 +53,9 @@ class State:
             reward += 100 * (tmr_close - close) / close
         done |= self.offset >= len(self.prices) - 1
         return reward, done
+
+    def _close(self):
+        return self.prices.ix[self.offset, 'close']
 
 
 class StockEnv(gym.Env):
