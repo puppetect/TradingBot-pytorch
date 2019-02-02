@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 import time
 import logging
+import argparse
 import gym
 import numpy as np
 import pandas as pd
@@ -27,15 +28,23 @@ TARGET_NET_SYNC = 1000
 STATES_TO_EVALUATE = 1000
 EVAL_EVERY_STEP = 1000
 VALIDATION_EVERY_STEP = 100000
+CHECKPOINT_EVERY_STEP = 20000
 
 EPSILON_START = 1.0
 EPSILON_FINAL = 0.1
 EPSILON_STEPS = 1000000
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--resume', default='', type=str, metavar='PATH',
+                    help='path to latest checkpoint (default: none)')
+parser.add_argument('--cuda', default=False, action='store_true',
+                    help='enable cuda')
+parser.add_argument('--local', default=False, action='store_true',
+                    help='use local runtime')
+args = parser.parse_args()
+device = torch.device('cuda' if args.cuda else 'cpu')
 
-device = 'cuda'
-run_local = False
-datestr = datetime.strftime(datetime.now(), '%Y-%m-%d-%H-%M-%S')
+datestr = datetime.strftime(datetime.today(), '%Y-%m-%d')
 save_path = os.path.join('saves', datestr)
 os.makedirs(save_path, exist_ok=True)
 
@@ -45,6 +54,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s',
                     handlers=[logging.FileHandler(os.path.join(save_path, 'console.log')),
                               logging.StreamHandler()])
 
+writer = SummaryWriter('runs')
 
 try:
     from lib import data
@@ -62,8 +72,6 @@ env_test = environ.StockEnv(train_data, bars_count=BARS_COUNT, reset_on_close=Tr
 env_test = gym.wrappers.TimeLimit(env_test, max_episode_steps=1000)
 env_val = environ.StockEnv(val_data, bars_count=BARS_COUNT, reset_on_close=True)
 env_val = gym.wrappers.TimeLimit(env_val, max_episode_steps=1000)
-
-writer = SummaryWriter('runs')
 
 net = models.DQNConv1d(env.observation_space.shape, env.action_space.n).to(device)
 tgt_net = models.DQNConv1d(env.observation_space.shape, env.action_space.n).to(device)
@@ -83,6 +91,19 @@ start_time = ts = time.time()
 
 eval_states = None
 best_mean_val = None
+
+if args.resume:
+    logger.info('Loading checkpoint %s' % args.resume)
+    checkpoint = torch.load(os.path.join(save_path, args.resume))
+    total_reward = checkpoint['total_reward']
+    total_steps = checkpoint['total_steps']
+    frame_idx = checkpoint['frame_idx']
+    eval_states = checkpoint['eval_states']
+    best_mean_val = checkpoint['best_mean_val']
+    net.load_state_dict(checkpoint['state_dict']),
+    tgt_net.load_state_dict(checkpoint['state_dict']),
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    logger.info('Loaded checkpoint %s, from frame %d)' % (args.resume, frame_idx))
 
 while True:
     frame_idx += 1
@@ -132,7 +153,7 @@ while True:
         mean_val = np.mean(mean_vals)
         writer.add_scalar('values_mean', mean_val, frame_idx)
         if best_mean_val is None or best_mean_val < mean_val:
-            torch.save(net.state_dict(), os.path.join(save_path, 'best_mean_val.pt'))
+            torch.save(net.state_dict(), os.path.join(save_path, 'best_mean_val.pth'))
             if best_mean_val is not None:
                 logger.info('Best mean value updated %.3f -> %.3f'
                             % (best_mean_val, mean_val))
@@ -155,8 +176,20 @@ while True:
         for key, val in res.items():
             writer.add_scalar(key + '_val', val, frame_idx)
 
-    # 8h training time on google colab
-    if time.time() - start_time > 28800:
-        break
+    if frame_idx % CHECKPOINT_EVERY_STEP == 0:
+        checkpoint = {'frame_idx': frame_idx,
+                      'state_dict': net.state_dict(),
+                      'optimizer': optimizer.state_dict(),
+                      'total_reward': total_reward,
+                      'total_steps': total_steps,
+                      'eval_states': eval_states,
+                      'best_mean_val': best_mean_val}
+        torch.save(checkpoint, os.path.join(save_path, 'checkpoint-%d.pth' % frame_idx))
+        logger.info('checkpoint saved at frame %d' % frame_idx)
+
+    # 10h time limit for google colab
+    if not args.local:
+        if time.time() - start_time > 36000:
+            break
 
 writer.close()
