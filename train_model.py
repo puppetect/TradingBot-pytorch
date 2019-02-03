@@ -1,6 +1,6 @@
 from lib import environ, models, validation
 from common import agent, experience, helper
-from datetime import datetime
+from datetime import datetime, date
 import os
 import time
 import logging
@@ -28,7 +28,8 @@ TARGET_NET_SYNC = 1000
 STATES_TO_EVALUATE = 1000
 EVAL_EVERY_STEP = 1000
 VALIDATION_EVERY_STEP = 100000
-CHECKPOINT_EVERY_STEP = 20000
+CHECKPOINT_EVERY_STEP = 50000
+GOOGLE_COLAB_MAX_STEP = 500000
 
 EPSILON_START = 1.0
 EPSILON_FINAL = 0.1
@@ -42,19 +43,8 @@ parser.add_argument('--cuda', default=False, action='store_true',
 parser.add_argument('--local', default=False, action='store_true',
                     help='use local runtime')
 args = parser.parse_args()
+
 device = torch.device('cuda' if args.cuda else 'cpu')
-
-datestr = datetime.strftime(datetime.today(), '%Y-%m-%d')
-save_path = os.path.join('saves', datestr)
-os.makedirs(save_path, exist_ok=True)
-
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s',
-                    handlers=[logging.FileHandler(os.path.join(save_path, 'console.log')),
-                              logging.StreamHandler()])
-
-writer = SummaryWriter('runs')
 
 try:
     from lib import data
@@ -92,9 +82,13 @@ start_time = ts = time.time()
 eval_states = None
 best_mean_val = None
 
+datestr = datetime.strftime(date(2019, 2, 2), '%Y-%m-%d')
+save_path = os.path.join('saves', datestr)
+os.makedirs(save_path, exist_ok=True)
+
 if args.resume:
-    logger.info('Loading checkpoint %s' % args.resume)
-    checkpoint = torch.load(os.path.join(save_path, args.resume))
+    print('Loading %s' % args.resume)
+    checkpoint = torch.load(os.path.join(save_path, 'checkpoints', args.resume))
     total_reward = checkpoint['total_reward']
     total_steps = checkpoint['total_steps']
     frame_idx = checkpoint['frame_idx']
@@ -103,12 +97,21 @@ if args.resume:
     net.load_state_dict(checkpoint['state_dict']),
     tgt_net.load_state_dict(checkpoint['state_dict']),
     optimizer.load_state_dict(checkpoint['optimizer'])
-    logger.info('Loaded checkpoint %s, from frame %d)' % (args.resume, frame_idx))
+    print('Loaded %s)' % args.resume)
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s',
+                    handlers=[logging.FileHandler(os.path.join(save_path, 'console.log')),
+                              logging.StreamHandler()])
+
+writer = SummaryWriter(os.path.join('runs', datestr))
 
 while True:
     frame_idx += 1
     buffer.populate(1)
     agent.epsilon = max(EPSILON_FINAL, EPSILON_START - frame_idx / EPSILON_STEPS)
+    if len(buffer) < REPLAY_INITIAL:
+        continue
     ep_reward, ep_steps = exp_source.pop_episode_result()
     if ep_reward:
         reward_buf.append(ep_reward)
@@ -134,11 +137,8 @@ while True:
         writer.add_scalar('steps', steps, frame_idx)
         writer.add_scalar('steps_100', mean_step, frame_idx)
 
-    if len(buffer) < REPLAY_INITIAL:
-        continue
-
     if eval_states is None:
-        logger.info('Initial buffer populated, start training')
+        print('Initial buffer populated, start training')
         eval_states = buffer.sample(STATES_TO_EVALUATE)
         eval_states = np.array([np.array(exp.state, copy=False)
                                 for exp in eval_states], copy=False)
@@ -170,9 +170,11 @@ while True:
 
     if frame_idx % VALIDATION_EVERY_STEP == 0:
         res = validation.run_val(env_test, net, device=device)
+        logger.info('%d test done, reward %.3f, step %d' % (frame_idx, res['episode_rewards'], res['episode_steps']))
         for key, val in res.items():
             writer.add_scalar(key + '_test', val, frame_idx)
         res = validation.run_val(env_val, net, device=device)
+        logger.info('%d validation done, reward %.3f, step %d' % (frame_idx, res['episode_rewards'], res['episode_steps']))
         for key, val in res.items():
             writer.add_scalar(key + '_val', val, frame_idx)
 
@@ -184,12 +186,12 @@ while True:
                       'total_steps': total_steps,
                       'eval_states': eval_states,
                       'best_mean_val': best_mean_val}
-        torch.save(checkpoint, os.path.join(save_path, 'checkpoint-%d.pth' % frame_idx))
-        logger.info('checkpoint saved at frame %d' % frame_idx)
+        torch.save(checkpoint, os.path.join(save_path, 'checkpoints', 'checkpoint-%d.pth' % frame_idx))
+        print('checkpoint saved at frame %d' % frame_idx)
 
-    # 10h time limit for google colab
+    # workaround Colab's time limit
     if not args.local:
-        if time.time() - start_time > 36000:
+        if frame_idx % GOOGLE_COLAB_MAX_STEP == 0:
             break
 
 writer.close()

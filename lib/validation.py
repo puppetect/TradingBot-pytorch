@@ -15,11 +15,10 @@ def run_val(env, net, episodes=100, device='cpu', epsilon=0.02):
 
         while True:
             obs_v = torch.tensor([obs]).to(device)
-            state_value_v = net(obs_v)
-            action_idx = state_value_v.max(1)[1].item()
+            out_v = net(obs_v)
+            action_idx = out_v.max(1)[1].item()
             if np.random.random() < epsilon:
                 action_idx = env.action_space.sample()
-            action = environ.Actions(action_idx)
 
             obs, reward, done, _ = env.step(action_idx)
             total_reward += reward

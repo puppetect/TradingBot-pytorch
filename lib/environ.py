@@ -3,9 +3,6 @@ import os
 import enum
 import gym
 
-DEFAULT_BARS_COUNT = 100
-DEFAULT_COMMISSION = 0.00025
-
 
 class Actions(enum.Enum):
     skip = 0
@@ -14,10 +11,10 @@ class Actions(enum.Enum):
 
 
 class State:
-    def __init__(self, bars_count, reset_on_close, commission):
+    def __init__(self, bars_count, commission, reset_on_close):
         self.bars_count = bars_count
-        self.reset_on_close = reset_on_close
         self.commission = commission
+        self.reset_on_close = reset_on_close
 
     def reset(self, prices, factors, offset):
         assert offset >= self.bars_count - 1
@@ -62,11 +59,11 @@ class State:
 class StockEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, prices, bars_count=DEFAULT_BARS_COUNT, reset_on_close=True,
-                 commission=DEFAULT_COMMISSION, random_ofs_on_reset=True):
+    def __init__(self, prices, bars_count=100, commission=0.00025, reset_on_close=True,
+                 random_ofs_on_reset=True):
         self.prices = prices[0]
         self.factors = prices[1]
-        self.state = State(bars_count, reset_on_close, commission)
+        self.state = State(bars_count, commission, reset_on_close)
         self.action_space = gym.spaces.Discrete(n=len(Actions))
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf,
                                                 shape=self.state.shape, dtype=np.float32)
