@@ -32,7 +32,7 @@ except ModuleNotFoundError:
     play_data = (pd.read_csv('data/prices_%d.csv' % args.year, index_col=0),
                  pd.read_csv('data/factors_%d.csv' % args.year, index_col=0))
 
-env = environ.StockEnv(play_data, bars_count=BARS_COUNT, commission=args.commission, reset_on_close=False, random_ofs_on_reset=False)
+env = environ.StockEnv(play_data, bars_count=BARS_COUNT, commission=args.commission, reset_on_sell=False, random_ofs_on_reset=False)
 net = models.DQNConv1d(env.observation_space.shape, env.action_space.n)
 datestr = datetime.strftime(date(2019, 2, 2), '%Y-%m-%d')
 save_path = os.path.join('saves', datestr)

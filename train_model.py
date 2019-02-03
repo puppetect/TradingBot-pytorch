@@ -5,6 +5,7 @@ import os
 import time
 import logging
 import argparse
+import collections
 import gym
 import numpy as np
 import pandas as pd
@@ -95,7 +96,7 @@ if args.resume:
     eval_states = checkpoint['eval_states']
     best_mean_val = checkpoint['best_mean_val']
     try:
-        buffer = (b for b in checkpoint['buffer'])
+        buffer.buffer = collections.deque(checkpoint['buffer'], maxlen=REPLAY_SIZE)
     except:
         pass
     net.load_state_dict(checkpoint['state_dict']),
@@ -190,7 +191,7 @@ while True:
                       'total_steps': total_steps,
                       'eval_states': eval_states,
                       'best_mean_val': best_mean_val,
-                      'buffer': list(buffer)}
+                      'buffer': list(buffer.buffer)}
         torch.save(checkpoint, os.path.join(save_path, 'checkpoints', 'checkpoint-%d.pth' % frame_idx))
         print('checkpoint saved at frame %d' % frame_idx)
 
