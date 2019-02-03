@@ -25,14 +25,14 @@ class ExperienceSource:
 
         while True:
             action_idx = self.agent([state])
-            next_state, reward, is_done, _ = self.env.step(action_idx)
+            next_state, reward, done, _ = self.env.step(action_idx)
             total_reward += reward
             total_step += 1
             step = Step(state=state, action=action_idx,
-                        reward=reward, done=is_done)
+                        reward=reward, done=done)
             exp.append(step)
             if len(exp) == self.steps_count:
-                last_state = next_state if not is_done else None
+                last_state = next_state if not done else None
                 sum_reward = 0.0
                 for e in reversed(exp):
                     sum_reward *= self.gamma
@@ -40,7 +40,7 @@ class ExperienceSource:
                 yield Experience(state=exp[0].state, action=exp[0].action,
                                  reward=sum_reward, last_state=last_state)
             state = next_state
-            if is_done:
+            if done:
                 self.episode_reward = total_reward
                 self.episode_step = total_step
                 total_reward = 0.0

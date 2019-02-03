@@ -56,11 +56,11 @@ except ModuleNotFoundError:
     val_data = (pd.read_csv('data/prices_2018.csv', index_col=0),
                 pd.read_csv('data/factors_2018.csv', index_col=0))
 
-env = environ.StockEnv(train_data, bars_count=BARS_COUNT, reset_on_close=True)
+env = environ.StockEnv(train_data, bars_count=BARS_COUNT, reset_on_sell=True)
 env = gym.wrappers.TimeLimit(env, max_episode_steps=1000)
-env_test = environ.StockEnv(train_data, bars_count=BARS_COUNT, reset_on_close=True)
+env_test = environ.StockEnv(train_data, bars_count=BARS_COUNT, reset_on_sell=True)
 env_test = gym.wrappers.TimeLimit(env_test, max_episode_steps=1000)
-env_val = environ.StockEnv(val_data, bars_count=BARS_COUNT, reset_on_close=True)
+env_val = environ.StockEnv(val_data, bars_count=BARS_COUNT, reset_on_sell=True)
 env_val = gym.wrappers.TimeLimit(env_val, max_episode_steps=1000)
 
 net = models.DQNConv1d(env.observation_space.shape, env.action_space.n).to(device)
@@ -94,10 +94,14 @@ if args.resume:
     frame_idx = checkpoint['frame_idx']
     eval_states = checkpoint['eval_states']
     best_mean_val = checkpoint['best_mean_val']
+    try:
+        buffer = (b for b in checkpoint['buffer'])
+    except:
+        pass
     net.load_state_dict(checkpoint['state_dict']),
     tgt_net.load_state_dict(checkpoint['state_dict']),
     optimizer.load_state_dict(checkpoint['optimizer'])
-    print('Loaded %s)' % args.resume)
+    print('Loaded %s' % args.resume)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s',
@@ -185,7 +189,8 @@ while True:
                       'total_reward': total_reward,
                       'total_steps': total_steps,
                       'eval_states': eval_states,
-                      'best_mean_val': best_mean_val}
+                      'best_mean_val': best_mean_val,
+                      'buffer': list(buffer)}
         torch.save(checkpoint, os.path.join(save_path, 'checkpoints', 'checkpoint-%d.pth' % frame_idx))
         print('checkpoint saved at frame %d' % frame_idx)
 
