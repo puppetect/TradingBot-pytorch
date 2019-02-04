@@ -176,8 +176,7 @@ def get_factors(index,
 
         if rolling >= 26:
             for i in factors_list:
-                tmp[i] = (tmp[i] - tmp[i].rolling(window=rolling, center=False).mean())\
-                    / tmp[i].rolling(window=rolling, center=False).std()
+                tmp[i] = (tmp[i] - tmp[i].rolling(window=rolling).mean()) / tmp[i].rolling(window=rolling).std()
         elif rolling < 26 & rolling > 0:
             print('Recommended rolling range greater than 26')
         elif rolling <= 0:

@@ -37,12 +37,10 @@ EPSILON_FINAL = 0.1
 EPSILON_STEPS = 1000000
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--resume', default='', type=str, metavar='PATH',
-                    help='path to latest checkpoint (default: none)')
-parser.add_argument('--cuda', default=False, action='store_true',
-                    help='enable cuda')
-parser.add_argument('--local', default=False, action='store_true',
-                    help='use local runtime')
+parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
+parser.add_argument('--cuda', default=False, action='store_true', help='enable cuda')
+parser.add_argument('--colab', default=False, action='store_true', help='enable colab hosted runtime')
+parser.add_argument('--double', default=False, action='store_true', help='enable double DQN')
 args = parser.parse_args()
 
 device = torch.device('cuda' if args.cuda else 'cpu')
@@ -95,10 +93,6 @@ if args.resume:
     frame_idx = checkpoint['frame_idx']
     eval_states = checkpoint['eval_states']
     best_mean_val = checkpoint['best_mean_val']
-    try:
-        buffer.buffer = collections.deque(checkpoint['buffer'], maxlen=REPLAY_SIZE)
-    except:
-        pass
     net.load_state_dict(checkpoint['state_dict']),
     tgt_net.load_state_dict(checkpoint['state_dict']),
     optimizer.load_state_dict(checkpoint['optimizer'])
@@ -121,26 +115,25 @@ while True:
     if ep_reward:
         reward_buf.append(ep_reward)
         steps_buf.append(ep_steps)
-        if len(reward_buf) < REWARD_GROUPS:
-            continue
-        reward = np.mean(reward_buf)
-        steps = np.mean(steps_buf)
-        reward_buf.clear()
-        steps_buf.clear()
-        total_reward.append(reward)
-        total_steps.append(steps)
-        speed = (frame_idx - frame_prev) / (time.time() - ts)
-        frame_prev = frame_idx
-        ts = time.time()
-        mean_reward = np.mean(total_reward[-100:])
-        mean_step = np.mean(total_steps[-100:])
-        logger.info('%d done %d games, mean reward %.3f, mean step %d, epsilon %.2f, speed %.2f f/s' % (frame_idx, len(total_reward), mean_reward, mean_step, agent.epsilon, speed))
-        writer.add_scalar('epsilon', agent.epsilon, frame_idx)
-        writer.add_scalar('speed', speed, frame_idx)
-        writer.add_scalar('reward', reward, frame_idx)
-        writer.add_scalar('reward_100', mean_reward, frame_idx)
-        writer.add_scalar('steps', steps, frame_idx)
-        writer.add_scalar('steps_100', mean_step, frame_idx)
+        if len(reward_buf) == REWARD_GROUPS:
+            reward = np.mean(reward_buf)
+            steps = np.mean(steps_buf)
+            reward_buf.clear()
+            steps_buf.clear()
+            total_reward.append(reward)
+            total_steps.append(steps)
+            speed = (frame_idx - frame_prev) / (time.time() - ts)
+            frame_prev = frame_idx
+            ts = time.time()
+            mean_reward = np.mean(total_reward[-100:])
+            mean_step = np.mean(total_steps[-100:])
+            logger.info('%d done %d games, mean reward %.3f, mean step %d, epsilon %.2f, speed %.2f f/s' % (frame_idx, len(total_reward), mean_reward, mean_step, agent.epsilon, speed))
+            writer.add_scalar('epsilon', agent.epsilon, frame_idx)
+            writer.add_scalar('speed', speed, frame_idx)
+            writer.add_scalar('reward', reward, frame_idx)
+            writer.add_scalar('reward_100', mean_reward, frame_idx)
+            writer.add_scalar('steps', steps, frame_idx)
+            writer.add_scalar('steps_100', mean_step, frame_idx)
 
     if eval_states is None:
         print('Initial buffer populated, start training')
@@ -166,7 +159,7 @@ while True:
 
     optimizer.zero_grad()
     batch = buffer.sample(BATCH_SIZE)
-    loss = helper.calc_loss(batch, net, tgt_net, GAMMA**REWARD_STEPS, device=device)
+    loss = helper.calc_loss(batch, net, tgt_net, GAMMA**REWARD_STEPS, device=device, double=args.double)
     loss.backward()
     optimizer.step()
 
@@ -190,13 +183,12 @@ while True:
                       'total_reward': total_reward,
                       'total_steps': total_steps,
                       'eval_states': eval_states,
-                      'best_mean_val': best_mean_val,
-                      'buffer': list(buffer.buffer)}
+                      'best_mean_val': best_mean_val}
         torch.save(checkpoint, os.path.join(save_path, 'checkpoints', 'checkpoint-%d.pth' % frame_idx))
         print('checkpoint saved at frame %d' % frame_idx)
 
     # workaround Colab's time limit
-    if not args.local:
+    if args.colab:
         if frame_idx % GOOGLE_COLAB_MAX_STEP == 0:
             break
 

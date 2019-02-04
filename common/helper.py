@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 
 
-def calc_loss(batch, net, tgt_net, gamma, device='cpu'):
+def calc_loss(batch, net, tgt_net, gamma, device='cpu', double=True):
     states, actions, rewards, dones, last_states = [], [], [], [], []
     for exp in batch:
         states.append(np.array(exp.state, copy=False))
@@ -21,8 +21,11 @@ def calc_loss(batch, net, tgt_net, gamma, device='cpu'):
 
     state_action_values = net(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
 
-    last_state_actions = net(last_states_v).max(1)[1]
-    last_state_action_values = tgt_net(last_states_v).gather(1, last_state_actions.unsqueeze(-1)).squeeze(-1)
+    if double:
+        last_state_actions = net(last_states_v).max(1)[1]
+        last_state_action_values = tgt_net(last_states_v).gather(1, last_state_actions.unsqueeze(-1)).squeeze(-1)
+    else:
+        last_state_action_values = tgt_net(last_states_v).max(1)[0]
     last_state_action_values[dones_v] = 0.0
     expected_state_action_values = last_state_action_values.detach() * gamma + rewards_v
     return nn.MSELoss()(state_action_values, expected_state_action_values)
