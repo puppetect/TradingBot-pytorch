@@ -76,13 +76,13 @@ reward_buf = []
 steps_buf = []
 frame_idx = 0
 frame_prev = 0
-start_time = ts = time.time()
+ts = time.time()
 
 eval_states = None
 best_mean_val = None
 
 datestr = datetime.strftime(date(2019, 2, 2), '%Y-%m-%d')
-save_path = os.path.join('saves', datestr)
+save_path = os.path.join('saves', datestr + '_dqnconv')
 os.makedirs(save_path, exist_ok=True)
 
 if args.resume:
@@ -103,14 +103,22 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s',
                     handlers=[logging.FileHandler(os.path.join(save_path, 'console.log')),
                               logging.StreamHandler()])
 
-writer = SummaryWriter(os.path.join('runs', datestr))
+writer = SummaryWriter(os.path.join('runs', datestr + '_dqnconv'))
 
 while True:
     frame_idx += 1
     buffer.populate(1)
     agent.epsilon = max(EPSILON_FINAL, EPSILON_START - frame_idx / EPSILON_STEPS)
+
     if len(buffer) < REPLAY_INITIAL:
         continue
+
+    optimizer.zero_grad()
+    batch = buffer.sample(BATCH_SIZE)
+    loss = helper.dqn_loss(batch, net, tgt_net, GAMMA**REWARD_STEPS, device=device, double=args.double)
+    loss.backward()
+    optimizer.step()
+
     ep_reward, ep_steps = exp_source.pop_episode_result()
     if ep_reward:
         reward_buf.append(ep_reward)
@@ -156,12 +164,6 @@ while True:
                 logger.info('Best mean value updated %.3f -> %.3f'
                             % (best_mean_val, mean_val))
             best_mean_val = mean_val
-
-    optimizer.zero_grad()
-    batch = buffer.sample(BATCH_SIZE)
-    loss = helper.calc_loss(batch, net, tgt_net, GAMMA**REWARD_STEPS, device=device, double=args.double)
-    loss.backward()
-    optimizer.step()
 
     if frame_idx % TARGET_NET_SYNC == 0:
         tgt_net.load_state_dict(net.state_dict())
