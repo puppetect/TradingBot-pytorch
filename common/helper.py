@@ -1,9 +1,11 @@
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 
+ENTROPY_BETA = 0.01
 
-def dqn_unpack_batch(batch):
+
+def unpack_batch(batch, device='cpu'):
     states, actions, rewards, dones, last_states = [], [], [], [], []
     for exp in batch:
         states.append(np.array(exp.state, copy=False))
@@ -12,17 +14,17 @@ def dqn_unpack_batch(batch):
         dones.append(exp.last_state is None)
         last_states.append(np.array(exp.last_state, copy=False)
                            if exp.last_state is not None else np.array(exp.state, copy=False))
-    return np.array(states, copy=False), np.array(actions), np.array(rewards, dtype=np.float32), np.array(dones, dtype=np.uint8), np.array(last_states, copy=False)
-
-
-def dqn_loss(batch, net, tgt_net, gamma, device='cpu', double=True):
-    states, actions, rewards, dones, last_states = dqn_unpack_batch(batch)
 
     states_v = torch.tensor(states).to(device)
-    last_states_v = torch.tensor(last_states).to(device)
     actions_v = torch.tensor(actions).to(device)
     rewards_v = torch.tensor(rewards).to(device)
     dones_v = torch.ByteTensor(dones).to(device)
+    last_states_v = torch.tensor(last_states).to(device)
+    return states_v, actions_v, rewards_v, dones_v, last_states_v
+
+
+def dqn_loss(batch, net, tgt_net, gamma, double=True):
+    states_v, actions_v, rewards_v, dones_v, last_states_v = unpack_batch(batch)
 
     state_action_values = net(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
 
@@ -33,7 +35,23 @@ def dqn_loss(batch, net, tgt_net, gamma, device='cpu', double=True):
         last_state_action_values = tgt_net(last_states_v).max(1)[0]
     last_state_action_values[dones_v] = 0.0
     expected_state_action_values = last_state_action_values.detach() * gamma + rewards_v
-    return nn.MSELoss()(state_action_values, expected_state_action_values)
+    return F.mse_loss(state_action_values, expected_state_action_values)
 
 
-def policy_loss(batch, net, device='cpu'):
+def a2c_loss(batch, net, gamma, beta=ENTROPY_BETA):
+    states_v, actions_v, rewards_v, dones_v, last_states_v = unpack_batch(batch)
+
+    last_vals_v = net(last_states_v)[1]
+    target_vals_v = rewards_v + gamma * last_vals_v[~dones_v]
+
+    logits_v, vals_v = net(states_v)
+    loss_val_v = F.mse_loss(vals_v, target_vals_v)
+
+    log_probs_v = F.log_softmax(logits_v, dim=1)
+    adv_v = target_vals_v - vals_v
+    loss_policy_v = - adv_v * log_probs_v[range(len(states_v)), actions_v]
+
+    probs_v = F.softmax(logits_v, dim=1)
+    loss_entropy_v = beta * (probs_v * log_probs_v).sum(dim=1).mean()
+
+    return loss_val_v, loss_policy_v, loss_entropy_v
