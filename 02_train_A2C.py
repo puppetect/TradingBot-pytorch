@@ -1,6 +1,5 @@
 from lib import environ, models, validation
 from common import agent, experience, helper
-from datetime import datetime, date
 import os
 import time
 import logging
@@ -11,19 +10,21 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.optim as optim
+import torch.nn.utils as nn_utils
 
 from common.writer import SummaryWriter
 
-
 BATCH_SIZE = 32
-BARS_COUNT = 100
+BARS_COUNT = 50
 REWARD_GROUPS = 100
+STATS_GROUPS = 10
 
-REPLAY_SIZE = 100000
-REPLAY_INITIAL = 10000
-REWARD_STEPS = 2
+
+GAMMA = 0.99
+ENTROPY_BETA = 0.01
+REWARD_STEPS = 4
+CLIP_GRAD = 0.1
 LEARNING_RATE = 0.0001
-TARGET_NET_SYNC = 1000
 
 STATES_TO_EVALUATE = 1000
 EVAL_EVERY_STEP = 1000
@@ -50,8 +51,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
 parser.add_argument('--cuda', default=False, action='store_true', help='enable cuda')
 parser.add_argument('--colab', default=False, action='store_true', help='enable colab hosted runtime')
-parser.add_argument('--double', default=False, action='store_true', help='enable double DQN')
-parser.add_argument('-n', '--name', required=True, type=str, help='run name')
 args = parser.parse_args()
 
 device = torch.device('cuda' if args.cuda else 'cpu')
@@ -73,82 +72,75 @@ env_test = gym.wrappers.TimeLimit(env_test, max_episode_steps=1000)
 env_val = environ.StockEnv(val_data, bars_count=BARS_COUNT, reset_on_sell=True)
 env_val = gym.wrappers.TimeLimit(env_val, max_episode_steps=1000)
 
-net = models.DQNConv1d(env.observation_space.shape, env.action_space.n).to(device)
-tgt_net = models.DQNConv1d(env.observation_space.shape, env.action_space.n).to(device)
+net = models.A2CConv1d(env.observation_space.shape, env.action_space.n).to(device)
 
-agent = agent.EpsilonGreedyAgent(net, env, epsilon=EPSILON_START, device=device)
+agent = agent.ProbabilityAgent(net, env, apply_softmax=True, device=device)
 exp_source = experience.ExperienceSource(env, agent, GAMMA)
-buffer = experience.ExperienceBuffer(exp_source, REPLAY_SIZE)
 optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
 
 total_reward = []
 total_steps = []
 reward_buf = []
 steps_buf = []
-batch_states, batch_actions, batch_rewards, batch_qvals = [], [], [], []
+batch = []
 frame_idx = 0
 frame_prev = 0
-done_episodes = 0
-batch_episodes = 0
 ts = time.time()
+stats = collections.defaultdict(list)
+best_mean_reward = None
 
-eval_states = None
-best_mean_val = None
-
-datestr = datetime.strftime(date(2019, 2, 2), '%Y-%m-%d')
-save_path = os.path.join('saves', datestr + '_' + args.name)
+file_name = os.path.splitext(os.path.basename(__file__))[0]
+save_path = os.path.join('saves', file_name)
 os.makedirs(save_path, exist_ok=True)
 
 if args.resume:
-    print('Loading %s' % args.resume)
+    print('==> Loading %s' % args.resume)
     checkpoint = torch.load(os.path.join(save_path, 'checkpoints', args.resume))
     total_reward = checkpoint['total_reward']
     total_steps = checkpoint['total_steps']
     frame_idx = checkpoint['frame_idx']
-    eval_states = checkpoint['eval_states']
-    best_mean_val = checkpoint['best_mean_val']
+    best_mean_reward = checkpoint['best_mean_reward'],
+    stats = checkpoint['stats'],
     net.load_state_dict(checkpoint['state_dict']),
-    tgt_net.load_state_dict(checkpoint['state_dict']),
     optimizer.load_state_dict(checkpoint['optimizer'])
-    print('Loaded %s' % args.resume)
+    print('==> Loaded %s' % args.resume)
 
-logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s',
                     handlers=[logging.FileHandler(os.path.join(save_path, 'console.log')),
                               logging.StreamHandler()])
 
-writer = SummaryWriter(os.path.join('runs', datestr + '_' + args.name))
+writer = SummaryWriter(os.path.join('runs', file_name))
 
 
 for exp in iter(exp_source):
     frame_idx += 1
-    batch_states.append(exp.state)
-    batch_actions.append(exp.actions)
-    batch_rewards.append(exp.reward)
-    if exp.last_state is None:
-        batch_qvals.extend(calc_qvals(batch_rewards))
-        batch_rewards.clear()
-        batch_episodes += 1
+    batch.append(exp)
 
-    if batch_episodes < EPISODES_TO_TRAIN:
+    if len(batch) < BATCH_SIZE:
         continue
 
     optimizer.zero_grad()
-    states_v = torch.FloatTensor(batch_states).to(device)
-    actions_v = torch.LongTensor(batch_actions).to(device)
-    qvals_v = torch.FloatTensor(batch_qvals).to(device)
-
-    logits_v = net(states_v)
-    log_probs_v = F.log_softmax(logits_v, dim=1)
-    policy_gradient = qvals_v * log_probs_v[range(len(states_v)), actions_v]
-    loss = - policy_gradient.mean()
-    loss.backward()
+    loss_val_v, loss_policy_v, loss_entropy_v = helper.a2c_loss(batch, net, GAMMA**REWARD_STEPS, ENTROPY_BETA, device=device)
+    batch.clear()
+    loss_policy_v.backward(retain_graph=True)
+    grads = np.concatenate([p.grad.data.cpu().numpy().flatten() for p in net.parameters() if p.grad is not None])
+    loss_v = loss_entropy_v + loss_val_v
+    loss_v.backward()
+    nn_utils.clip_grad_norm_(net.parameters(), CLIP_GRAD)
     optimizer.step()
+    loss_v += loss_policy_v
 
-    batch_episodes = 0
-    batch_states.clear()
-    batch_actions.clear()
-    batch_qvals.clear()
+    stats['loss_value'].append(loss_val_v)
+    stats['loss_policy'].append(loss_policy_v)
+    stats['loss_entropy'].append(loss_entropy_v)
+    stats['loss'].append(loss_v)
+    stats['grad_l2'].append(np.sqrt(np.mean(np.square(grads))))
+    stats['grad_max'].append(np.max(np.abs(grads)))
+    stats['grad_var'].append(np.var(grads))
+    for stat in stats:
+        if len(stat) >= STATS_GROUPS:
+            writer.add_scalar(stat, np.mean(stats[stat]), frame_idx)
+            stats[stat].clear()
 
     ep_reward, ep_steps = exp_source.pop_episode_result()
     if ep_reward:
@@ -166,46 +158,27 @@ for exp in iter(exp_source):
             ts = time.time()
             mean_reward = np.mean(total_reward[-100:])
             mean_step = np.mean(total_steps[-100:])
-            logger.info('%d done %d games, mean reward %.3f, mean step %d, epsilon %.2f, speed %.2f f/s' % (frame_idx, len(total_reward), mean_reward, mean_step, agent.epsilon, speed))
+            logging.info('%d done %d games, mean reward %.3f, mean step %d, epsilon %.2f, speed %.2f f/s' % (frame_idx, len(total_reward), mean_reward, mean_step, agent.epsilon, speed))
             writer.add_scalar('epsilon', agent.epsilon, frame_idx)
             writer.add_scalar('speed', speed, frame_idx)
             writer.add_scalar('reward', reward, frame_idx)
             writer.add_scalar('reward_100', mean_reward, frame_idx)
             writer.add_scalar('steps', steps, frame_idx)
             writer.add_scalar('steps_100', mean_step, frame_idx)
-
-    if eval_states is None:
-        print('Initial buffer populated, start training')
-        eval_states = buffer.sample(STATES_TO_EVALUATE)
-        eval_states = np.array([np.array(exp.state, copy=False)
-                                for exp in eval_states], copy=False)
-
-    if frame_idx % EVAL_EVERY_STEP == 0:
-        mean_vals = []
-        for batch in np.array_split(eval_states, 64):
-            states_v = torch.tensor(batch).to(device)
-            action_values_v = net(states_v)
-            best_action_values_v = action_values_v.max(1)[0]
-            mean_vals.append(best_action_values_v.mean().item())
-        mean_val = np.mean(mean_vals)
-        writer.add_scalar('values_mean', mean_val, frame_idx)
-        if best_mean_val is None or best_mean_val < mean_val:
-            torch.save(net.state_dict(), os.path.join(save_path, 'best_mean_val.pth'))
-            if best_mean_val is not None:
-                logger.info('Best mean value updated %.3f -> %.3f'
-                            % (best_mean_val, mean_val))
-            best_mean_val = mean_val
-
-    if frame_idx % TARGET_NET_SYNC == 0:
-        tgt_net.load_state_dict(net.state_dict())
+            if best_mean_reward is None or best_mean_reward < mean_reward:
+                torch.save(net.state_dict(), os.path.join(save_path, 'best_mean_reward.pth'))
+                if best_mean_reward is not None:
+                    logging.info('Best mean value updated %.3f -> %.3f'
+                                 % (best_mean_reward, mean_reward))
+                best_mean_reward = mean_reward
 
     if frame_idx % VALIDATION_EVERY_STEP == 0:
         res = validation.run_val(env_test, net, device=device)
-        logger.info('%d test done, reward %.3f, step %d' % (frame_idx, res['episode_rewards'], res['episode_steps']))
+        logging.info('%d test done, reward %.3f, step %d' % (frame_idx, res['episode_rewards'], res['episode_steps']))
         for key, val in res.items():
             writer.add_scalar(key + '_test', val, frame_idx)
         res = validation.run_val(env_val, net, device=device)
-        logger.info('%d validation done, reward %.3f, step %d' % (frame_idx, res['episode_rewards'], res['episode_steps']))
+        logging.info('%d validation done, reward %.3f, step %d' % (frame_idx, res['episode_rewards'], res['episode_steps']))
         for key, val in res.items():
             writer.add_scalar(key + '_val', val, frame_idx)
 
@@ -215,10 +188,10 @@ for exp in iter(exp_source):
                       'optimizer': optimizer.state_dict(),
                       'total_reward': total_reward,
                       'total_steps': total_steps,
-                      'eval_states': eval_states,
-                      'best_mean_val': best_mean_val}
+                      'best_mean_reward': best_mean_reward,
+                      'stats': stats}
         torch.save(checkpoint, os.path.join(save_path, 'checkpoints', 'checkpoint-%d.pth' % frame_idx))
-        print('checkpoint saved at frame %d' % frame_idx)
+        print('==> checkpoint saved at frame %d' % frame_idx)
 
     # workaround Colab's time limit
     if args.colab:

@@ -49,7 +49,7 @@ def a2c_loss(batch, net, gamma, beta=ENTROPY_BETA):
 
     log_probs_v = F.log_softmax(logits_v, dim=1)
     adv_v = target_vals_v - vals_v
-    loss_policy_v = - adv_v * log_probs_v[range(len(states_v)), actions_v]
+    loss_policy_v = - adv_v * log_probs_v[range(len(states_v)), actions_v].mean()
 
     probs_v = F.softmax(logits_v, dim=1)
     loss_entropy_v = beta * (probs_v * log_probs_v).sum(dim=1).mean()
