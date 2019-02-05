@@ -5,7 +5,6 @@ import os
 import time
 import logging
 import argparse
-import collections
 import gym
 import numpy as np
 import pandas as pd
@@ -81,8 +80,8 @@ ts = time.time()
 eval_states = None
 best_mean_val = None
 
-datestr = datetime.strftime(date(2019, 2, 2), '%Y-%m-%d')
-save_path = os.path.join('saves', datestr + '_dqnconv')
+file_name = os.path.splitext(os.path.basename(__file__))[0]
+save_path = os.path.join('saves', file_name)
 os.makedirs(save_path, exist_ok=True)
 
 if args.resume:
@@ -103,7 +102,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s',
                     handlers=[logging.FileHandler(os.path.join(save_path, 'console.log')),
                               logging.StreamHandler()])
 
-writer = SummaryWriter(os.path.join('runs', datestr + '_dqnconv'))
+writer = SummaryWriter(os.path.join('runs', file_name))
 
 while True:
     frame_idx += 1
