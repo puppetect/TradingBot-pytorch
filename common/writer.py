@@ -10,9 +10,9 @@ except ImportError:
 
 class SummaryWriter(object):
 
-    def __init__(self, log_dir='runs'):
+    def __init__(self, log_dir='runs', *args, **kwargs):
         """Create a summary writer logging to log_dir."""
-        self.writer = tf.summary.FileWriter(log_dir)
+        self.writer = tf.summary.FileWriter(log_dir, *args, **kwargs)
 
     def close(self):
         self.writer.close()

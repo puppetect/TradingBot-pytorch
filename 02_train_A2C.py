@@ -33,17 +33,7 @@ GOOGLE_COLAB_MAX_STEP = 1000000
 
 EPSILON_START = 1.0
 EPSILON_FINAL = 0.1
-EPSILON_STEPS = 1000000
-
-
-def calc_qvals(rewards):
-    sum = 0
-    buf = []
-    for reward in reversed(rewards):
-        sum *= GAMMA
-        sum += reward
-        buf.append(sum)
-    return list(reversed(buf))
+EPSILON_STEPS = 2000000
 
 
 parser = argparse.ArgumentParser()
@@ -99,7 +89,6 @@ if args.resume:
     total_steps = checkpoint['total_steps']
     frame_idx = checkpoint['frame_idx']
     best_mean_reward = checkpoint['best_mean_reward'],
-    stats = checkpoint['stats'],
     net.load_state_dict(checkpoint['state_dict']),
     optimizer.load_state_dict(checkpoint['optimizer'])
     print('==> Loaded %s' % args.resume)
@@ -166,10 +155,14 @@ for exp in iter(exp_source):
             writer.add_scalar('steps_100', mean_step, frame_idx)
             if best_mean_reward is None or best_mean_reward < mean_reward:
                 torch.save(net.state_dict(), os.path.join(save_path, 'best_mean_reward.pth'))
-                if best_mean_reward is not None:
-                    logging.info('Best mean value updated %.3f -> %.3f'
-                                 % (best_mean_reward, mean_reward))
-                best_mean_reward = mean_reward
+                try:
+                    if best_mean_reward is not None:
+                        logging.info('Best mean value updated %.3f -> %.3f'
+                                     % (best_mean_reward, mean_reward))
+                except:
+                    pass
+                finally:
+                    best_mean_reward = mean_reward
 
     # if frame_idx % VALIDATION_EVERY_STEP == 0:
     #     res = validation.run_val(env_test, net, device=device)
@@ -188,7 +181,7 @@ for exp in iter(exp_source):
                       'total_reward': total_reward,
                       'total_steps': total_steps,
                       'best_mean_reward': best_mean_reward,
-                      'stats': stats}
+                      }
         os.makedirs(os.path.join(save_path, 'checkpoints'), exist_ok=True)
         torch.save(checkpoint, os.path.join(save_path, 'checkpoints', 'checkpoint-%d.pth' % frame_idx))
         print('==> checkpoint saved at frame %d' % frame_idx)
