@@ -4,9 +4,8 @@ import torch.nn.functional as F
 
 
 class EpsilonGreedyAgent:
-    def __init__(self, net, env, epsilon, device='cpu'):
+    def __init__(self, net, epsilon, device='cpu'):
         self.net = net
-        self.env = env
         self.device = device
         self.epsilon = epsilon
 
@@ -21,19 +20,18 @@ class EpsilonGreedyAgent:
 
 
 class ProbabilityAgent:
-    def __init__(self, net, env, apply_softmax=False, device='cpu'):
+    def __init__(self, net, apply_softmax=False, device='cpu'):
         self.net = net
-        self.env = env
         self.apply_softmax = apply_softmax
         self.device = device
 
     def __call__(self, states):  # state: (N, C, L)
         state_a = np.array(states, copy=False)
         state_v = torch.tensor(state_a).to(self.device)
-        logits = self.net(state_v).data.cpu().numpy()  # (N, A)
-        if apply_softmax:
-            probs = F.softmax(logits, dim=1)
+        logits = self.net(state_v)  # (N, A)
+        if self.apply_softmax:
+            logits = F.softmax(logits, dim=1).data.cpu().numpy()
         action_idx = []
-        for prob in probs:
-            action_idx.append(np.random.choice(len(prob), p=prob))
+        for logit in logits:
+            action_idx.append(np.random.choice(len(logit), p=logit))
         return np.array(action_idx)  # (N,)

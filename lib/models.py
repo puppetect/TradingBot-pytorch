@@ -91,13 +91,13 @@ class A2CConv1d(nn.Module):
         self.policy = nn.Sequential(
             nn.Linear(out_size, 512),  # (N, 128*(L-8)) -> (N, 512)
             nn.ReLU(),
-            nn.Linear(512, 1)  # (N, 512) -> (N, 1)
+            nn.Linear(512, actions_n)  # (N, 512) -> (N, A)
         )
 
         self.value = nn.Sequential(
             nn.Linear(out_size, 512),  # (N, 128*(L-8)) -> (N, 512)
             nn.ReLU(),
-            nn.Linear(512, actions_n)  # (N, 512) -> (N, A)
+            nn.Linear(512, 1)  # (N, 512) -> (N,)
         )
 
     def get_conv_out(self, shape):
@@ -106,4 +106,4 @@ class A2CConv1d(nn.Module):
 
     def forward(self, x):
         conv_out = self.conv(x).view(x.shape[0], -1)
-        return self.policy(conv_out), self.value(conv_out)  # (N, A)
+        return self.policy(conv_out), self.value(conv_out)  # (N, A), (N,)

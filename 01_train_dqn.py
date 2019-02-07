@@ -63,7 +63,7 @@ env_val = gym.wrappers.TimeLimit(env_val, max_episode_steps=1000)
 net = models.DQNConv1d(env.observation_space.shape, env.action_space.n).to(device)
 tgt_net = models.DQNConv1d(env.observation_space.shape, env.action_space.n).to(device)
 
-agent = agent.EpsilonGreedyAgent(net, env, epsilon=EPSILON_START, device=device)
+agent = agent.EpsilonGreedyAgent(net, epsilon=EPSILON_START, device=device)
 exp_source = experience.ExperienceSource(env, agent, GAMMA, steps_count=REWARD_STEPS)
 buffer = experience.ExperienceBuffer(exp_source, REPLAY_SIZE)
 optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
@@ -113,7 +113,7 @@ while True:
 
     optimizer.zero_grad()
     batch = buffer.sample(BATCH_SIZE)
-    loss = helper.dqn_loss(batch, net, tgt_net, GAMMA**REWARD_STEPS, device=device, double=args.double)
+    loss = helper.dqn_loss(batch, net, tgt_net, GAMMA**REWARD_STEPS, device=device, double=args.double, device)
     loss.backward()
     optimizer.step()
 

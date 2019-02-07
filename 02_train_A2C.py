@@ -14,6 +14,7 @@ import torch.nn.utils as nn_utils
 
 from common.writer import SummaryWriter
 
+
 BATCH_SIZE = 32
 BARS_COUNT = 50
 REWARD_GROUPS = 100
@@ -26,11 +27,9 @@ REWARD_STEPS = 4
 CLIP_GRAD = 0.1
 LEARNING_RATE = 0.0001
 
-STATES_TO_EVALUATE = 1000
-EVAL_EVERY_STEP = 1000
-VALIDATION_EVERY_STEP = 100000
+# VALIDATION_EVERY_STEP = 100000
 CHECKPOINT_EVERY_STEP = 50000
-GOOGLE_COLAB_MAX_STEP = 500000
+GOOGLE_COLAB_MAX_STEP = 1000000
 
 EPSILON_START = 1.0
 EPSILON_FINAL = 0.1
@@ -74,9 +73,9 @@ env_val = gym.wrappers.TimeLimit(env_val, max_episode_steps=1000)
 
 net = models.A2CConv1d(env.observation_space.shape, env.action_space.n).to(device)
 
-agent = agent.ProbabilityAgent(net, env, apply_softmax=True, device=device)
-exp_source = experience.ExperienceSource(env, agent, GAMMA)
-optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
+agent = agent.ProbabilityAgent(lambda x: net(x)[0], apply_softmax=True, device=device)
+exp_source = experience.ExperienceSource(env, agent, GAMMA, steps_count=REWARD_STEPS)
+optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE, eps=1e-3)
 
 total_reward = []
 total_steps = []
@@ -120,7 +119,7 @@ for exp in iter(exp_source):
         continue
 
     optimizer.zero_grad()
-    loss_val_v, loss_policy_v, loss_entropy_v = helper.a2c_loss(batch, net, GAMMA**REWARD_STEPS, ENTROPY_BETA, device=device)
+    loss_val_v, loss_policy_v, loss_entropy_v = helper.a2c_loss(batch, net, GAMMA**REWARD_STEPS, ENTROPY_BETA, device)
     batch.clear()
     loss_policy_v.backward(retain_graph=True)
     grads = np.concatenate([p.grad.data.cpu().numpy().flatten() for p in net.parameters() if p.grad is not None])
@@ -133,17 +132,18 @@ for exp in iter(exp_source):
     stats['loss_value'].append(loss_val_v)
     stats['loss_policy'].append(loss_policy_v)
     stats['loss_entropy'].append(loss_entropy_v)
-    stats['loss'].append(loss_v)
+    stats['loss_total'].append(loss_v)
     stats['grad_l2'].append(np.sqrt(np.mean(np.square(grads))))
     stats['grad_max'].append(np.max(np.abs(grads)))
     stats['grad_var'].append(np.var(grads))
     for stat in stats:
         if len(stat) >= STATS_GROUPS:
-            writer.add_scalar(stat, np.mean(stats[stat]), frame_idx)
+            writer.add_scalar(stat, torch.mean(torch.stack(stats[stat])).item(), frame_idx)
             stats[stat].clear()
 
     ep_reward, ep_steps = exp_source.pop_episode_result()
     if ep_reward:
+        print('%d done, Episode reward: %.4f, Episode step: %d' % (frame_idx, ep_reward, ep_steps))
         reward_buf.append(ep_reward)
         steps_buf.append(ep_steps)
         if len(reward_buf) == REWARD_GROUPS:
@@ -158,8 +158,7 @@ for exp in iter(exp_source):
             ts = time.time()
             mean_reward = np.mean(total_reward[-100:])
             mean_step = np.mean(total_steps[-100:])
-            logging.info('%d done %d games, mean reward %.3f, mean step %d, epsilon %.2f, speed %.2f f/s' % (frame_idx, len(total_reward), mean_reward, mean_step, agent.epsilon, speed))
-            writer.add_scalar('epsilon', agent.epsilon, frame_idx)
+            logging.info('%d done %d games, mean reward %.3f, mean step %d, speed %.2f f/s' % (frame_idx, len(total_reward), mean_reward, mean_step, speed))
             writer.add_scalar('speed', speed, frame_idx)
             writer.add_scalar('reward', reward, frame_idx)
             writer.add_scalar('reward_100', mean_reward, frame_idx)
@@ -172,15 +171,15 @@ for exp in iter(exp_source):
                                  % (best_mean_reward, mean_reward))
                 best_mean_reward = mean_reward
 
-    if frame_idx % VALIDATION_EVERY_STEP == 0:
-        res = validation.run_val(env_test, net, device=device)
-        logging.info('%d test done, reward %.3f, step %d' % (frame_idx, res['episode_rewards'], res['episode_steps']))
-        for key, val in res.items():
-            writer.add_scalar(key + '_test', val, frame_idx)
-        res = validation.run_val(env_val, net, device=device)
-        logging.info('%d validation done, reward %.3f, step %d' % (frame_idx, res['episode_rewards'], res['episode_steps']))
-        for key, val in res.items():
-            writer.add_scalar(key + '_val', val, frame_idx)
+    # if frame_idx % VALIDATION_EVERY_STEP == 0:
+    #     res = validation.run_val(env_test, net, device=device)
+    #     logging.info('%d test done, reward %.3f, step %d' % (frame_idx, res['episode_rewards'], res['episode_steps']))
+    #     for key, val in res.items():
+    #         writer.add_scalar(key + '_test', val, frame_idx)
+    #     res = validation.run_val(env_val, net, device=device)
+    #     logging.info('%d validation done, reward %.3f, step %d' % (frame_idx, res['episode_rewards'], res['episode_steps']))
+    #     for key, val in res.items():
+    #         writer.add_scalar(key + '_val', val, frame_idx)
 
     if frame_idx % CHECKPOINT_EVERY_STEP == 0:
         checkpoint = {'frame_idx': frame_idx,
@@ -190,6 +189,7 @@ for exp in iter(exp_source):
                       'total_steps': total_steps,
                       'best_mean_reward': best_mean_reward,
                       'stats': stats}
+        os.makedirs(os.path.join(save_path, 'checkpoints'), exist_ok=True)
         torch.save(checkpoint, os.path.join(save_path, 'checkpoints', 'checkpoint-%d.pth' % frame_idx))
         print('==> checkpoint saved at frame %d' % frame_idx)
 
