@@ -12,7 +12,6 @@ import torch
 import torch.optim as optim
 import torch.nn.utils as nn_utils
 import torch.multiprocessing as mp
-
 from common.writer import SummaryWriter
 
 
@@ -31,17 +30,17 @@ CLIP_GRAD = 0.1
 LEARNING_RATE = 0.0001
 
 PROCESSES_COUNT = 4
-CHECKPOINT_EVERY_STEP = 50000
+CHECKPOINT_EVERY_STEP = 10000
 GOOGLE_COLAB_MAX_STEP = 1000000
 
 EPSILON_START = 1.0
 EPSILON_FINAL = 0.1
 EPSILON_STEPS = 1000000
 
-EpisodeReward = collections.namedtuple('EpisodeReward', 'reward, steps, frame_idx')
+EpisodeReward = collections.namedtuple('EpisodeReward', 'reward, steps')
 
 
-def worker(net, device, train_queue, reward_queue, proc_idx):
+def worker(net, device, train_queue, proc_idx, save_path):
     try:
         from lib import data
         train_data = data.read_csv(file_name='data/000001_2018.csv')
@@ -55,12 +54,22 @@ def worker(net, device, train_queue, reward_queue, proc_idx):
 
     batch = []
     frame_idx = 0
+    total_reward = []
+    total_steps = []
+    reward_buf = []
+    steps_buf = []
+    frame_idx = 0
+    frame_prev = 0
+    ts = time.time()
+    best_mean_reward = None
 
     stats = collections.defaultdict(list)
 
     file_name = os.path.splitext(os.path.basename(__file__))[0]
     proc_name = 'worker_' + '%d' % proc_idx
     writer = SummaryWriter(os.path.join('runs', file_name, proc_name))
+
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s', handlers=[logging.FileHandler(os.path.join(save_path, 'console.log')), logging.StreamHandler()])
 
     for exp in exp_source:
         frame_idx += 1
@@ -89,8 +98,33 @@ def worker(net, device, train_queue, reward_queue, proc_idx):
 
         ep_reward, ep_steps = exp_source.pop_episode_result()
         if ep_reward:
-            print('worker_%d: %d done, Episode reward: %.4f, Episode step: %d' % (proc_idx, frame_idx, ep_reward, ep_steps))
-            reward_queue.put(EpisodeReward(reward=ep_reward, steps=ep_steps, frame_idx=frame_idx))
+            print('Worker_%d: %d done, Episode reward: %.4f, Episode step: %d' % (proc_idx, frame_idx, ep_reward, ep_steps))
+            reward_buf.append(ep_reward)
+            steps_buf.append(ep_steps)
+            if len(reward_buf) == REWARD_GROUPS:
+                reward = np.mean(reward_buf)
+                steps = np.mean(steps_buf)
+                reward_buf.clear()
+                steps_buf.clear()
+                total_reward.append(reward)
+                total_steps.append(steps)
+                speed = (frame_idx - frame_prev) / (time.time() - ts)
+                frame_prev = frame_idx
+                ts = time.time()
+                mean_reward = np.mean(total_reward[-100:])
+                mean_step = np.mean(total_steps[-100:])
+                logging.info('%d done, mean reward %.3f, mean step %d, speed %d f/s' % (frame_idx, mean_reward, mean_step, speed))
+                writer.add_scalar('speed', speed, frame_idx)
+                writer.add_scalar('reward', reward, frame_idx)
+                writer.add_scalar('reward_100', mean_reward, frame_idx)
+                writer.add_scalar('steps', steps, frame_idx)
+                writer.add_scalar('steps_100', mean_step, frame_idx)
+                if best_mean_reward is None or best_mean_reward < mean_reward:
+                    torch.save(net.state_dict(), os.path.join(save_path, 'best_mean_reward-%.3f.pth') % mean_reward)
+                    if best_mean_reward is not None:
+                        logging.info('Worker_%d: Best mean value updated %.3f -> %.3f'
+                                     % (proc_idx, best_mean_reward, mean_reward))
+                    best_mean_reward = mean_reward
     writer.close()
 
 
@@ -127,58 +161,19 @@ if __name__ == '__main__':
     writer = SummaryWriter(os.path.join('runs', file_name, 'main'))
 
     train_queue = mp.Queue(maxsize=PROCESSES_COUNT)
-    reward_queue = mp.Queue(maxsize=PROCESSES_COUNT)
     data_proc_list = []
     for proc_idx in range(PROCESSES_COUNT):
-        data_proc = mp.Process(target=worker, args=(net, device, train_queue, reward_queue, proc_idx))
+        data_proc = mp.Process(target=worker, args=(net, device, train_queue, proc_idx, save_path))
         data_proc.start()
         data_proc_list.append(data_proc)
 
     batch = []
-    total_reward = []
-    total_steps = []
-    reward_buf = []
-    steps_buf = []
-    grad_buf = None
     step_idx = 0
-    frame_idx = 0
-    frame_prev = 0
-    ts = time.time()
-    best_mean_reward = None
+    grad_buf = None
 
     try:
         while True:
             train_entry = train_queue.get()
-            reward_entry = reward_queue.get()
-            if reward_entry:
-                reward_buf.append(reward_entry.reward)
-                steps_buf.append(reward_entry.steps)
-                frame_idx += reward_entry.frame_idx
-                if len(reward_buf) == REWARD_GROUPS:
-                    reward = np.mean(reward_buf)
-                    steps = np.mean(steps_buf)
-                    reward_buf.clear()
-                    steps_buf.clear()
-                    total_reward.append(reward)
-                    total_steps.append(steps)
-                    speed = (frame_idx - frame_prev) / (time.time() - ts)
-                    frame_prev = frame_idx
-                    ts = time.time()
-                    mean_reward = np.mean(total_reward[-100:])
-                    mean_step = np.mean(total_steps[-100:])
-                    logging.info('%d done, mean reward %.3f, mean step %d, speed %d f/s' % (frame_idx, mean_reward, mean_step, speed))
-                    writer.add_scalar('speed', speed, frame_idx)
-                    writer.add_scalar('reward', reward, frame_idx)
-                    writer.add_scalar('reward_100', mean_reward, frame_idx)
-                    writer.add_scalar('steps', steps, frame_idx)
-                    writer.add_scalar('steps_100', mean_step, frame_idx)
-                    if best_mean_reward is None or best_mean_reward < mean_reward:
-                        torch.save(net.state_dict(), os.path.join(save_path, 'best_mean_reward-%.3f.pth') % mean_reward)
-                        if best_mean_reward is not None:
-                            logging.info('Best mean value updated %.3f -> %.3f'
-                                         % (best_mean_reward, mean_reward))
-                        best_mean_reward = mean_reward
-
             step_idx += 1
 
             if grad_buf is None:
@@ -195,23 +190,22 @@ if __name__ == '__main__':
                 optimizer.step()
                 grad_buf = None
 
+            # if step_idx % CHECKPOINT_EVERY_STEP == 0:
+            #     checkpoint = {'step_idx': step_idx,
+            #                   'state_dict': net.state_dict(),
+            #                   'optimizer': optimizer.state_dict(),
+            #                   'total_reward': total_reward,
+            #                   'total_steps': total_steps,
+            #                   'best_mean_reward': best_mean_reward}
+            #     os.makedirs(os.path.join(save_path, 'checkpoints', 'main'), exist_ok=True)
+            #     torch.save(checkpoint, os.path.join(save_path, 'checkpoints', 'main', 'checkpoint-%d.pth' % step_idx))
+            #     print('==> main: checkpoint saved at frame %d' % step_idx)
+
     finally:
         for p in data_proc_list:
             p.terminate()
             p.join()
 
-
-# if frame_idx % CHECKPOINT_EVERY_STEP == 0:
-#     checkpoint = {'frame_idx': frame_idx,
-#                   'state_dict': net.state_dict(),
-#                   'optimizer': optimizer.state_dict(),
-#                   'total_reward': total_reward,
-#                   'total_steps': total_steps,
-#                   'best_mean_reward': best_mean_reward,
-#                   'stats': stats}
-#     os.makedirs(os.path.join(save_path, 'checkpoints'), exist_ok=True)
-#     torch.save(checkpoint, os.path.join(save_path, 'checkpoints', 'checkpoint-%d.pth' % frame_idx))
-#     print('==> checkpoint saved at frame %d' % frame_idx)
 
 # # workaround Colab's time limit
 # if args.colab:
