@@ -20,7 +20,7 @@ GRAD_BATCH = 64
 TRAIN_BATCH = 2
 
 BARS_COUNT = 50
-REWARD_GROUPS = 100
+REWARD_GROUPS = 50
 STATS_GROUPS = 10
 
 
@@ -38,8 +38,16 @@ EPSILON_START = 1.0
 EPSILON_FINAL = 0.1
 EPSILON_STEPS = 1000000
 
+EpisodeReward = collections.namedtuple('EpisodeReward', 'reward, steps, frame_idx')
 
-def grads_func(proc_name, net, device, train_queue):
+
+def worker(net, device, train_queue, reward_queue, proc_idx):
+    try:
+        from lib import data
+        train_data = data.read_csv(file_name='data/000001_2018.csv')
+    except ModuleNotFoundError:
+        train_data = (pd.read_csv('data/prices_2018.csv', index_col=0),
+                      pd.read_csv('data/factors_2018.csv', index_col=0))
     env = environ.StockEnv(train_data, bars_count=BARS_COUNT, reset_on_sell=True)
     env = gym.wrappers.TimeLimit(env, max_episode_steps=1000)
     agt = agent.ProbabilityAgent(lambda x: net(x)[0], apply_softmax=True, device=device)
@@ -47,16 +55,12 @@ def grads_func(proc_name, net, device, train_queue):
 
     batch = []
     frame_idx = 0
-    frame_prev = 0
-    ts = time.time()
-    stats = collections.defaultdict(list)
-    best_mean_reward = None
 
-    total_reward = []
-    total_steps = []
-    reward_buf = []
-    steps_buf = []
-    writer = SummaryWriter(os.path.join('runs', file_name), comment=proc_name)
+    stats = collections.defaultdict(list)
+
+    file_name = os.path.splitext(os.path.basename(__file__))[0]
+    proc_name = 'worker_' + '%d' % proc_idx
+    writer = SummaryWriter(os.path.join('runs', file_name, proc_name))
 
     for exp in exp_source:
         frame_idx += 1
@@ -64,14 +68,14 @@ def grads_func(proc_name, net, device, train_queue):
         if len(batch) < GRAD_BATCH:
             continue
 
-        optimizer.zero_grad()
+        net.zero_grad()
         loss_val_v, loss_policy_v, loss_entropy_v = helper.a2c_loss(batch, net, GAMMA**REWARD_STEPS, ENTROPY_BETA, device)
         batch.clear()
-        loss_policy_v.backward(retain_graph=True)
         loss_v = loss_entropy_v + loss_val_v + loss_policy_v
         loss_v.backward()
         nn_utils.clip_grad_norm_(net.parameters(), CLIP_GRAD)
-        grads = np.concatenate([p.grad.data.cpu().numpy().flatten() for p in net.parameters() if p.grad is not None])
+        grads = [param.grad.data.cpu().numpy() if param.grad is not None else None
+                 for param in net.parameters()]
         train_queue.put(grads)
 
         stats['loss_value'].append(loss_val_v)
@@ -85,107 +89,116 @@ def grads_func(proc_name, net, device, train_queue):
 
         ep_reward, ep_steps = exp_source.pop_episode_result()
         if ep_reward:
-            print('%d done, Episode reward: %.4f, Episode step: %d' % (frame_idx, ep_reward, ep_steps))
-            reward_buf.append(ep_reward)
-            steps_buf.append(ep_steps)
-            if len(reward_buf) == REWARD_GROUPS:
-                reward = np.mean(reward_buf)
-                steps = np.mean(steps_buf)
-                reward_buf.clear()
-                steps_buf.clear()
-                total_reward.append(reward)
-                total_steps.append(steps)
-                speed = (frame_idx - frame_prev) / (time.time() - ts)
-                frame_prev = frame_idx
-                ts = time.time()
-                mean_reward = np.mean(total_reward[-100:])
-                mean_step = np.mean(total_steps[-100:])
-                logging.info('%d done %d games, mean reward %.3f, mean step %d, speed %.2f f/s' % (frame_idx, len(total_reward), mean_reward, mean_step, speed))
-                writer.add_scalar('speed', speed, frame_idx)
-                writer.add_scalar('reward', reward, frame_idx)
-                writer.add_scalar('reward_100', mean_reward, frame_idx)
-                writer.add_scalar('steps', steps, frame_idx)
-                writer.add_scalar('steps_100', mean_step, frame_idx)
-                if best_mean_reward is None or best_mean_reward < mean_reward:
-                    torch.save(net.state_dict(), os.path.join(save_path, 'best_mean_reward.pth'))
-                    if best_mean_reward is not None:
-                        logging.info('Best mean value updated %.3f -> %.3f'
-                                     % (best_mean_reward, mean_reward))
-                    best_mean_reward = mean_reward
+            print('worker_%d: %d done, Episode reward: %.4f, Episode step: %d' % (proc_idx, frame_idx, ep_reward, ep_steps))
+            reward_queue.put(EpisodeReward(reward=ep_reward, steps=ep_steps, frame_idx=frame_idx))
     writer.close()
-    train_queue.put(None)
 
 
-mp.set_start_method('spawn')
-parser = argparse.ArgumentParser()
-parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
-parser.add_argument('--cuda', default=False, action='store_true', help='enable cuda')
-parser.add_argument('--colab', default=False, action='store_true', help='enable colab hosted runtime')
-args = parser.parse_args()
+if __name__ == '__main__':
+    mp.set_start_method('spawn')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
+    parser.add_argument('--cuda', default=False, action='store_true', help='enable cuda')
+    parser.add_argument('--colab', default=False, action='store_true', help='enable colab hosted runtime')
+    args = parser.parse_args()
 
-device = torch.device('cuda' if args.cuda else 'cpu')
+    device = torch.device('cuda' if args.cuda else 'cpu')
 
-try:
-    from lib import data
-    train_data = data.read_csv(file_name='data/000001_2017.csv')
-    val_data = data.read_csv(file_name='data/000001_2018.csv')
-except ModuleNotFoundError:
-    train_data = (pd.read_csv('data/prices_2017.csv', index_col=0),
-                  pd.read_csv('data/factors_2017.csv', index_col=0))
-    val_data = (pd.read_csv('data/prices_2018.csv', index_col=0),
-                pd.read_csv('data/factors_2018.csv', index_col=0))
+    try:
+        from lib import data
+        train_data = data.read_csv(file_name='data/000001_2018.csv')
+    except ModuleNotFoundError:
+        train_data = (pd.read_csv('data/prices_2018.csv', index_col=0),
+                      pd.read_csv('data/factors_2018.csv', index_col=0))
 
-env = environ.StockEnv(train_data, bars_count=BARS_COUNT, reset_on_sell=True)
-env = gym.wrappers.TimeLimit(env, max_episode_steps=1000)
-net = models.A2CConv1d(env.observation_space.shape, env.action_space.n).to(device)
-optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE, eps=1e-3)
+    env = environ.StockEnv(train_data, bars_count=BARS_COUNT, reset_on_sell=True)
+    env = gym.wrappers.TimeLimit(env, max_episode_steps=1000)
+    net = models.A2CConv1d(env.observation_space.shape, env.action_space.n).to(device)
+    net.share_memory()
+    optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE, eps=1e-3)
 
-file_name = os.path.splitext(os.path.basename(__file__))[0]
-save_path = os.path.join('saves', file_name)
-os.makedirs(save_path, exist_ok=True)
+    file_name = os.path.splitext(os.path.basename(__file__))[0]
+    save_path = os.path.join('saves', file_name)
+    os.makedirs(save_path, exist_ok=True)
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s',
-                    handlers=[logging.FileHandler(os.path.join(save_path, 'console.log')),
-                              logging.StreamHandler()])
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s',
+                        handlers=[logging.FileHandler(os.path.join(save_path, 'console.log')),
+                                  logging.StreamHandler()])
+    writer = SummaryWriter(os.path.join('runs', file_name, 'main'))
 
-train_queue = mp.Queue(maxsize=PROCESSES_COUNT)
-data_proc_list = []
-for proc_idx in range(PROCESSES_COUNT):
-    proc_name = '-a3c-grad_' + '#%d' % proc_idx
-    data_proc = mp.Process(target=grads_func, args=(proc_name, net, device, train_queue))
-    data_proc.start()
-    data_proc_list.append(data_proc)
+    train_queue = mp.Queue(maxsize=PROCESSES_COUNT)
+    reward_queue = mp.Queue(maxsize=PROCESSES_COUNT)
+    data_proc_list = []
+    for proc_idx in range(PROCESSES_COUNT):
+        data_proc = mp.Process(target=worker, args=(net, device, train_queue, reward_queue, proc_idx))
+        data_proc.start()
+        data_proc_list.append(data_proc)
 
-batch = []
-step_idx = 0
-grad_buf = None
+    batch = []
+    total_reward = []
+    total_steps = []
+    reward_buf = []
+    steps_buf = []
+    grad_buf = None
+    step_idx = 0
+    frame_idx = 0
+    frame_prev = 0
+    ts = time.time()
+    best_mean_reward = None
 
-try:
-    while True:
-        train_entry = train_queue.get()
-        if train_entry is None:
-            break
+    try:
+        while True:
+            train_entry = train_queue.get()
+            reward_entry = reward_queue.get()
+            if reward_entry:
+                reward_buf.append(reward_entry.reward)
+                steps_buf.append(reward_entry.steps)
+                frame_idx += reward_entry.frame_idx
+                if len(reward_buf) == REWARD_GROUPS:
+                    reward = np.mean(reward_buf)
+                    steps = np.mean(steps_buf)
+                    reward_buf.clear()
+                    steps_buf.clear()
+                    total_reward.append(reward)
+                    total_steps.append(steps)
+                    speed = (frame_idx - frame_prev) / (time.time() - ts)
+                    frame_prev = frame_idx
+                    ts = time.time()
+                    mean_reward = np.mean(total_reward[-100:])
+                    mean_step = np.mean(total_steps[-100:])
+                    logging.info('%d done, mean reward %.3f, mean step %d, speed %d f/s' % (frame_idx, mean_reward, mean_step, speed))
+                    writer.add_scalar('speed', speed, frame_idx)
+                    writer.add_scalar('reward', reward, frame_idx)
+                    writer.add_scalar('reward_100', mean_reward, frame_idx)
+                    writer.add_scalar('steps', steps, frame_idx)
+                    writer.add_scalar('steps_100', mean_step, frame_idx)
+                    if best_mean_reward is None or best_mean_reward < mean_reward:
+                        torch.save(net.state_dict(), os.path.join(save_path, 'best_mean_reward-%.3f.pth') % mean_reward)
+                        if best_mean_reward is not None:
+                            logging.info('Best mean value updated %.3f -> %.3f'
+                                         % (best_mean_reward, mean_reward))
+                        best_mean_reward = mean_reward
 
-        step_idx += 1
+            step_idx += 1
 
-        if grad_buf is None:
-            grad_buf = train_entry
-        else:
-            for tgt_grad, grad in zip(grad_buf, train_entry):
-                tgt_grad += grad
+            if grad_buf is None:
+                grad_buf = train_entry
+            else:
+                for tgt_grad, grad in zip(grad_buf, train_entry):
+                    tgt_grad += grad
 
-        if step_idx % TRAIN_BATCH == 0:
-            for param, grad in zip(net.parameters(), grad_buffer):
-                param.grad = torch.FloatTensor(grad).to(device)
+            if step_idx % TRAIN_BATCH == 0:
+                for param, grad in zip(net.parameters(), grad_buf):
+                    param.grad = torch.FloatTensor(grad).to(device)
 
-            nn.utils.clip_grad_norm_(net.parameters(), CLIP_GRAD)
-            optimizer.step()
-            grad_buf = None
+                nn_utils.clip_grad_norm_(net.parameters(), CLIP_GRAD)
+                optimizer.step()
+                grad_buf = None
 
-finally:
-    for p in data_proc_list:
-        p.terminate()
-        p.join()
+    finally:
+        for p in data_proc_list:
+            p.terminate()
+            p.join()
 
 
 # if frame_idx % CHECKPOINT_EVERY_STEP == 0:
