@@ -2,6 +2,20 @@
 import pandas as pd
 import numpy as np
 import talib
+import os
+
+
+def load_data(year):
+    prices_file = 'data/000001_prices_%d.csv' % year
+    factors_file = 'data/000001_factors_%d.csv' % year
+    if os.path.exists(prices_file):
+        df = pd.read_csv(prices_file, index_col=0)
+        fac = pd.read_csv(factors_file, index_col=0)
+    else:
+        df, fac = read_csv('data/000001_%d.csv' % year)
+        df.to_csv('data/000001_prices_%d.csv' % year)
+        fac.to_csv('data/000001_factors_%d.csv' % year)
+    return df, fac
 
 
 def read_csv(file_name, sep=','):
@@ -13,10 +27,10 @@ def read_csv(file_name, sep=','):
                       df.low.values,
                       df.volume.values,
                       rolling=188,
-                      drop=False)
+                      drop=True)
     fac.replace([np.inf, -np.inf], np.nan, inplace=True)
     fac.fillna(0, inplace=True)
-    return df, fac
+    return df.loc[fac.index], fac
 
 
 def get_factors(index,
@@ -30,6 +44,14 @@ def get_factors(index,
                 normalization=True):
     tmp = pd.DataFrame()
     tmp['tradeTime'] = index
+
+    tmp['OPEN'] = open
+
+    tmp['CLOSE'] = close
+
+    tmp['HIGH'] = high
+
+    tmp['LOW'] = low
 
     # 累积/派发线（Accumulation / Distribution Line，该指标将每日的成交量通过价格加权累计，
     # 用以计算成交量的动量。属于趋势型因子
