@@ -11,10 +11,11 @@ class Actions(enum.Enum):
 
 
 class State:
-    def __init__(self, bars_count, commission, reset_on_sell):
+    def __init__(self, bars_count, commission, reset_on_sell, reward_on_empty):
         self.bars_count = bars_count
         self.commission = commission
         self.reset_on_sell = reset_on_sell
+        self.reward_on_empty = reward_on_empty
 
     def reset(self, prices, factors, offset):
         assert offset >= self.bars_count - 1
@@ -49,6 +50,8 @@ class State:
         tmr_close = self._close()
         if self.have_position:
             reward += 100 * (tmr_close - close) / close
+        if self.reward_on_empty and not self.have_position:
+            reward -= 100 * (tmr_close - close) / close
         done |= self.offset >= len(self.prices) - 1
         return reward, done
 
@@ -60,10 +63,10 @@ class StockEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
     def __init__(self, prices, bars_count=100, commission=0.00025, reset_on_sell=True,
-                 random_ofs_on_reset=True):
+                 random_ofs_on_reset=True, reward_on_empty=False):
         self.prices = prices[0]
         self.factors = prices[1]
-        self.state = State(bars_count, commission, reset_on_sell)
+        self.state = State(bars_count, commission, reset_on_sell, reward_on_empty)
         self.action_space = gym.spaces.Discrete(n=len(Actions))
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf,
                                                 shape=self.state.shape, dtype=np.float32)
