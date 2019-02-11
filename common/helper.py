@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
-ENTROPY_BETA = 0.01
+ENTROPY_BETA = 0.02
 
 
 def unpack_batch(batch, device='cpu'):
