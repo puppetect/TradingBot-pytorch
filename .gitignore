@@ -2,7 +2,6 @@
 runs
 saves
 *.pyc
-*.png
 data
 plots
 __pycache__
