@@ -62,11 +62,12 @@ if __name__ == '__main__':
             break
 
     save_time = datetime.strftime(datetime.now(), '%m%d-%H%M')
-    save_file = os.path.join('plots', '02_play_a2c', 'a2c-rewards-%s-comm_%.3f_%s.png' % (args.year, args.commission * 100, save_time))
+    save_dir = os.path.join('plots', '02_play_a2c')
+    os.makedirs(save_dir, exist_ok=True)
 
     plt.plot(benchmark_rewards, label='benchmark')
     plt.plot(strategy_rewards, label='a2c')
     plt.title('%s Total Reward, comm %.3f' % (args.year, args.commission * 100))
     plt.ylabel('Reward, %')
     plt.legend()
-    plt.savefig(save_file)
+    plt.savefig(os.path.join(save_dir, 'a2c-rewards-%s-comm_%.3f_%s.png' % (args.year, args.commission * 100, save_time)))
