@@ -25,9 +25,9 @@ class ExperienceSource:
 
         while True:
             action_idx = self.agent([state])
-            next_state, reward, done, _ = self.env.step(action_idx)
+            next_state, reward, done, info = self.env.step(action_idx)
             total_reward += reward
-            total_step += 1
+            total_step += info['have_position']
             step = Step(state=state, action=action_idx,
                         reward=reward, done=done)
             exp.append(step)
