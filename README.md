@@ -86,36 +86,36 @@ A2CConv1d(
 - 手续费：买入卖出各万分之二点五
 - 基准线：2016年初买入平安银行并持有一年不动的收益率
 ```
-100: reward=-0.152, baseline_reward=-0.110
-200: reward=-0.138, baseline_reward=-0.110
-300: reward=-0.131, baseline_reward=-0.110
+100: reward=-0.127, benchmark_reward=-0.110
+200: reward=-0.113, benchmark_reward=-0.110
+300: reward=-0.106, benchmark_reward=-0.110
 ......
-58000: reward=-0.190, baseline_reward=-3.183
-58100: reward=-0.301, baseline_reward=-3.293
-58200: reward=-0.073, baseline_reward=-3.074
+58000: reward=-0.165, benchmark_reward=-3.183
+58100: reward=-0.276, benchmark_reward=-3.293
+58200: reward=-0.048, benchmark_reward=-3.074
 ```
 - 回测结果：黄色为模型收益、蓝色为基准收益
-<img src="img/a2c-rewards-2016-comm_0.025_0211-0810.png" width="450">
+<img src="img/a2c-rewards-2016-comm_0.025_0212-1318.png" width="450">
 
-> 打败基准3个百分点
+> 跑赢基准3个百分点
 
 ### 2016-2018年回测
 
 - 手续费：买入卖出各万分之二点五
 - 基准线：2016年初买入平安银行并持有三年不动的收益率
 ```
-100: reward=-0.152, baseline_reward=-0.110
-200: reward=-0.138, baseline_reward=-0.110
-300: reward=-0.131, baseline_reward=-0.110
+100: reward=-0.127, benchmark_reward=-0.110
+200: reward=-0.113, benchmark_reward=-0.110
+300: reward=-0.106, benchmark_reward=-0.110
 ......
-163700: reward=30.293, baseline_reward=19.210
-163800: reward=32.684, baseline_reward=22.064
-163900: reward=31.196, baseline_reward=20.198
+174900: reward=15.889, benchmark_reward=2.195
+175000: reward=17.394, benchmark_reward=3.732
+175100: reward=16.867, benchmark_reward=3.183
 ```
 - 回测结果：黄色为模型收益、蓝色为基准收益
-<img src="img/a2c-rewards-161718-comm_0.025_0211-0759.png" width="450">
+<img src="img/a2c-rewards-161718-comm_0.025_0212-1344.png" width="450">
 
-> 打败基准11个百分点
+> 跑赢基准13.7个百分点
 
 ## 优化
 1. 增加训练数据，比如用多年或多只股票的数据反应更宏观的行情

@@ -1,24 +1,33 @@
 import numpy as np
-import os
+import pandas as pd
 import enum
 import gym
 
+BETA = 1
+
 
 class Actions(enum.Enum):
-    skip = 0
-    buy = 1
-    sell = 2
+    hold = 0
+    empty = 1
 
 
 class State:
     def __init__(self, bars_count, commission, reset_on_sell, reward_on_empty, play):
+        assert isinstance(bars_count, int)
+        assert isinstance(commission, float)
+        assert isinstance(reset_on_sell, bool)
+        assert isinstance(reward_on_empty, bool)
+        assert bars_count > 0
         self.bars_count = bars_count
+        assert commission >= 0.0
         self.commission = commission
         self.reset_on_sell = reset_on_sell
         self.reward_on_empty = reward_on_empty
         self.play = play
 
     def reset(self, prices, factors, offset):
+        assert isinstance(prices, pd.DataFrame)
+        assert isinstance(factors, pd.DataFrame)
         assert offset >= self.bars_count - 1
         self.have_position = False
         self.prices = prices
@@ -31,35 +40,38 @@ class State:
 
     def encode(self):
         res = np.zeros(shape=self.shape, dtype=np.float32)
-        factors_count = len(self.factors.columns)
-        for idx in range(factors_count):
+        fac_count = len(self.factors.columns)
+        for idx in range(fac_count):
             res[idx] = self.factors.iloc[self.offset - self.bars_count:self.offset, idx]
         if self.have_position:
-            res[factors_count] = 1.0
-            res[factors_count + 1] = (self._cur_close() - self.open_price) / self.open_price
+            res[fac_count] = 1.0
+            res[fac_count + 1] = (self._close() - self.open_price) / self.open_price
         return res
 
     def step(self, action):
+        assert isinstance(action, Actions)
         reward = 0
         done = False
         close = self._close()
-        if action == Actions.buy and not self.have_position:
+        if action == Actions.hold and not self.have_position:
             reward -= self.commission * 100
             self.have_position = True
-        if action == Actions.sell and self.have_position:
+            self.open_price = close
+        if action == Actions.empty and self.have_position:
             reward -= self.commission * 100
             done |= self.reset_on_sell
             self.have_position = False
+            self.open_price = 0.0
 
         self.offset += 1
-        tmr_close = self._close()
+        next_close = self._close()
         if self.have_position:
             if self.play:
-                reward += 100 * (tmr_close - close) / close
+                reward += 100 * (next_close - close) / close
             else:
-                reward += max(-10, min(10, (100 * (tmr_close - close) / close)**3))
+                reward += max(-10, min(10, (100 * (next_close - close) / close)**3))
         if self.reward_on_empty and not self.have_position:
-            reward -= 100 * (tmr_close - close) / close
+            reward -= BETA * 100 * (next_close - close) / close
         done |= self.offset >= len(self.prices) - 1
         info = {'have_position': int(self.have_position)}
         return reward, done, info
@@ -73,8 +85,8 @@ class StockEnv(gym.Env):
 
     def __init__(self, prices, bars_count=100, commission=0.00025, reset_on_sell=True,
                  random_ofs_on_reset=True, reward_on_empty=False, play=False):
-        self.prices = prices[0]
-        self.factors = prices[1]
+        assert isinstance(prices, tuple)
+        self.prices, self.factors = prices
         self.state = State(bars_count, commission, reset_on_sell, reward_on_empty, play)
         self.action_space = gym.spaces.Discrete(n=len(Actions))
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf,

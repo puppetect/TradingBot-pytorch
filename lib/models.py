@@ -4,6 +4,7 @@ import torch.nn as nn
 
 
 class SimpleFFDQN(nn.Module):
+
     def __init__(self, obs_len, actions_n):
         super().__init__()
 
@@ -39,9 +40,9 @@ class DQNConv1d(nn.Module):
         super().__init__()
 
         self.conv = nn.Sequential(
-            nn.Conv1d(obs_shape[0], 128, 5),  # (N, C, L) -> (N, 128, L-4)
+            nn.Conv1d(obs_shape[0], 128, 21),  # (N, C, L) -> (N, 128, L-4)
             nn.ReLU(),
-            nn.Conv1d(128, 128, 5),  # (N, 128, L-4) -> (N, 128, L-8)
+            nn.Conv1d(128, 256, 21),  # (N, 128, L-4) -> (N, 128, L-8)
             nn.ReLU()
         )
 
@@ -71,10 +72,6 @@ class DQNConv1d(nn.Module):
 
 
 class A2CConv1d(nn.Module):
-    """Dueling DQN
-    :math::
-    \text{Q}(s,a) = \text{V}(s)+\text{A}(s,a) - \frac{1}{N}\textstyle\sum_{k}\text{A}(s,k)
-    """
 
     def __init__(self, obs_shape, actions_n):
         super().__init__()

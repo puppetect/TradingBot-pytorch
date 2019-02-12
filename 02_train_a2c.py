@@ -17,12 +17,12 @@ from common.writer import SummaryWriter
 
 BATCH_SIZE = 32
 BARS_COUNT = 50
-REWARD_GROUPS = 100
+REWARD_GROUPS = 10
 STATS_GROUPS = 10
 
 
 GAMMA = 0.99
-ENTROPY_BETA = 0.02
+ENTROPY_BETA = 0.01
 REWARD_STEPS = 4
 CLIP_GRAD = 0.1
 LEARNING_RATE = 0.0001
@@ -33,6 +33,7 @@ GOOGLE_COLAB_MAX_STEP = 5000000
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('-y', '--year', default=2018, type=int, help='year of data to train (default: 2018')
     parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
     parser.add_argument('--cuda', default=False, action='store_true', help='enable cuda')
     parser.add_argument('--colab', default=False, action='store_true', help='enable colab hosted runtime')
@@ -42,13 +43,13 @@ if __name__ == '__main__':
 
     try:
         from lib import data
-        train_data = data.load_data(args.year)
+        train_data = data.load_data(year=args.year)
     except ModuleNotFoundError:
-        # workaround issue that talib not installable on Colab
+        # workaround that Ta-lib cannot be installed on Colab
         train_data = (pd.read_csv('data/000001_prices_%d.csv' % args.year, index_col=0),
                       pd.read_csv('data/000001_factors_%d.csv' % args.year, index_col=0))
 
-    env = environ.StockEnv(train_data, bars_count=BARS_COUNT, reset_on_sell=True)
+    env = environ.StockEnv(train_data, bars_count=BARS_COUNT, commission=0.0, reset_on_sell=True, reward_on_empty=False)
     env = gym.wrappers.TimeLimit(env, max_episode_steps=1000)
 
     net = models.A2CConv1d(env.observation_space.shape, env.action_space.n).to(device)
@@ -78,7 +79,7 @@ if __name__ == '__main__':
         total_reward = checkpoint['total_reward']
         total_steps = checkpoint['total_steps']
         frame_idx = checkpoint['frame_idx']
-        best_mean_reward = checkpoint['best_mean_reward'][0],
+        best_mean_reward = float(checkpoint['best_mean_reward']),
         net.load_state_dict(checkpoint['state_dict']),
         optimizer.load_state_dict(checkpoint['optimizer'])
         print('==> Loaded %s' % args.resume)
@@ -89,7 +90,7 @@ if __name__ == '__main__':
 
     writer = SummaryWriter(os.path.join('runs', file_name))
 
-    for exp in iter(exp_source):
+    for exp in exp_source:
         frame_idx += 1
         batch.append(exp)
 
@@ -121,7 +122,7 @@ if __name__ == '__main__':
 
         ep_reward, ep_steps = exp_source.pop_episode_result()
         if ep_reward:
-            print('%d done, Episode reward: %.4f, Episode step: %d' % (frame_idx, ep_reward, ep_steps))
+            logging.info('%d done, Episode reward: %.4f, Episode step: %d' % (frame_idx, ep_reward, ep_steps))
             reward_buf.append(ep_reward)
             steps_buf.append(ep_steps)
             if len(reward_buf) == REWARD_GROUPS:
@@ -146,7 +147,7 @@ if __name__ == '__main__':
                     torch.save(net.state_dict(), os.path.join(save_path, 'best_mean_reward.pth'))
                     try:
                         if best_mean_reward is not None:
-                            logging.info('Best mean value updated %.3f -> %.3f'
+                            logging.info('Best mean reward updated %.3f -> %.3f'
                                          % (best_mean_reward, mean_reward))
                     except Exception as e:
                         print(e)
