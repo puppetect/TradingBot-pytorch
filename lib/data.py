@@ -78,15 +78,15 @@ def get_factors(index,
 
     # 均幅指标（Average TRUE Ranger），取一定时间周期内的股价波动幅度的移动平均值，
     # 是显示市场变化率的指标，主要用于研判买卖时机。属于超买超卖型因子。
-    tmp['ATR14'] = talib.ATR(high, low, close, timeperiod=14)
-    res['ATR6'] = talib.ATR(high, low, close, timeperiod=6)
+    res['ATR14'] = talib.ATR(high, low, close, timeperiod=14)
+    tmp['ATR6'] = talib.ATR(high, low, close, timeperiod=6)
 
     # 布林带
     tmp['Boll_Up'], tmp['Boll_Mid'], tmp['Boll_Down'] = \
         talib.BBANDS(close, timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
 
     # 均势指标
-    tmp['BOP'] = talib.BOP(open, high, low, close)
+    res['BOP'] = talib.BOP(open, high, low, close)
 
     # 5日顺势指标（Commodity Channel Index），专门测量股价是否已超出常态分布范围。属于超买超卖型因子。
     tmp['CCI5'] = talib.CCI(high, low, close, timeperiod=5)
@@ -129,7 +129,7 @@ def get_factors(index,
 
     # 动量指标（Momentom Index），动量指数以分析股价波动的速度为目的，研究股价在波动过程中各种加速，
     # 减速，惯性作用以及股价由静到动或由动转静的现象。属于趋势型因子
-    tmp['MOM'] = talib.MOM(close, timeperiod=10)
+    res['MOM'] = talib.MOM(close, timeperiod=10)
 
     # 归一化平均值范围
     tmp['NATR'] = talib.NATR(high, low, close, timeperiod=14)
@@ -139,11 +139,12 @@ def get_factors(index,
     res['OBV'] = talib.OBV(close, volume)
 
     # PLUS_DI 更向指示器
-    res['PLUS_DI'] = talib.PLUS_DI(high, low, close, timeperiod=14)
-    res['PLUS_DM'] = talib.PLUS_DM(high, low, timeperiod=14)
+    tmp['PLUS_DI'] = talib.PLUS_DI(high, low, close, timeperiod=14)
+    tmp['PLUS_DM'] = talib.PLUS_DM(high, low, timeperiod=14)
+    res['PLUS'] = tmp['PLUS_DI'] - tmp['PLUS_DM']
 
     # PPO 价格振荡百分比
-    res['PPO'] = talib.PPO(close, fastperiod=6, slowperiod=26, matype=0)
+    tmp['PPO'] = talib.PPO(close, fastperiod=6, slowperiod=26, matype=0)
 
     # ROC 6日变动速率（Price Rate of Change），以当日的收盘价和N天前的收盘价比较，
     # 通过计算股价某一段时间内收盘价变动的比例，应用价格的移动比较来测量价位动量。属于超买超卖型因子。
