@@ -3,6 +3,5 @@ runs
 saves
 *.pyc
 data
-*.csv
 plots
 __pycache__
