@@ -66,6 +66,7 @@ def worker(net, device, train_queue, proc_idx, save_path):
     stats = collections.defaultdict(list)
 
     file_name = os.path.splitext(os.path.basename(__file__))[0]
+    file_name = file_name.split('_')[-1]
     proc_name = 'worker_' + '%d' % proc_idx
     writer = SummaryWriter(os.path.join('runs', file_name, proc_name))
 
@@ -152,6 +153,7 @@ if __name__ == '__main__':
     optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE, eps=1e-3)
 
     file_name = os.path.splitext(os.path.basename(__file__))[0]
+    file_name = file_name.split('_')[-1]
     save_path = os.path.join('saves', file_name)
     os.makedirs(save_path, exist_ok=True)
 

@@ -82,6 +82,7 @@ if __name__ == '__main__':
     best_mean_val = None
 
     file_name = os.path.splitext(os.path.basename(__file__))[0]
+    file_name = file_name.split('_')[-1]
     save_path = os.path.join('saves', file_name)
     os.makedirs(save_path, exist_ok=True)
 

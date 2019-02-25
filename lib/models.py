@@ -77,9 +77,9 @@ class A2CConv1d(nn.Module):
         super().__init__()
 
         self.conv = nn.Sequential(
-            nn.Conv1d(obs_shape[0], 128, 5),  # (N, C, L) -> (N, 128, L-4)
+            nn.Conv1d(obs_shape[0], 128, 21),  # (N, C, L) -> (N, 128, L-4)
             nn.ReLU(),
-            nn.Conv1d(128, 128, 5),  # (N, 128, L-4) -> (N, 128, L-8)
+            nn.Conv1d(128, 128, 21),  # (N, 128, L-4) -> (N, 128, L-8)
             nn.ReLU()
         )
 
@@ -104,3 +104,40 @@ class A2CConv1d(nn.Module):
     def forward(self, x):
         conv_out = self.conv(x).view(x.shape[0], -1)
         return self.policy(conv_out), self.value(conv_out)  # (N, A), (N,)
+
+
+class DDPGActor(nn.Module):
+    def __init__(self, obs_size, act_size):
+        super(DDPGActor, self).__init__()
+
+        self.net = nn.Sequential(
+            nn.Linear(obs_size, 400),  # (N, L) -> (N, 400)
+            nn.ReLU(),
+            nn.Linear(400, 300),  # (N, 400) -> (N, 300)
+            nn.ReLU(),
+            nn.Linear(300, act_size),  # (N, 300) -> (N, A)
+            nn.Tanh()
+        )
+
+    def forward(self, x):
+        return self.net(x)  # (N, A)
+
+
+class DDPGCritic(nn.Module):
+    def __init__(self, obs_size, act_size):
+        super(DDPGCritic, self).__init__()
+
+        self.obs_net = nn.Sequential(
+            nn.Linear(obs_size, 400),  # (N, L) -> (N, 400)
+            nn.ReLU(),
+        )
+
+        self.out_net = nn.Sequential(
+            nn.Linear(400 + act_size, 300),  # (N, 400+A) -> (N, 300)
+            nn.ReLU(),
+            nn.Linear(300, 1)  # (N, 300) -> (N, 1)
+        )
+
+    def forward(self, x, a):
+        obs = self.obs_net(x)  # (N, 400)
+        return self.out_net(torch.cat([obs, a], dim=1))  # (N, 1)

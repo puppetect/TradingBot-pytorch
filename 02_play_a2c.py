@@ -29,30 +29,41 @@ if __name__ == '__main__':
 
     play_data = (pd.read_csv('data/000001_prices_%d.csv' % args.year, index_col=0),
                  pd.read_csv('data/000001_factors_%d.csv' % args.year, index_col=0))
-    env = environ.StockEnv(play_data, bars_count=BARS_COUNT, commission=args.commission, reset_on_sell=False, random_ofs_on_reset=False, reward_on_empty=False, play=True)
+    env = environ.StockEnv(play_data, bars_count=BARS_COUNT, commission=args.commission, reset_on_sell=False, random_ofs_on_reset=False, reward_on_empty=False)
     net = models.A2CConv1d(env.observation_space.shape, env.action_space.n).to(device)
     agent = agent.ProbabilityAgent(lambda x: net(x)[0], apply_softmax=True, device=device)
     state_dict = torch.load(args.model, map_location=lambda storage, loc: storage)
     net.load_state_dict(state_dict)
 
     obs = env.reset()
-    init_close = env.state._close()
+
+    init_close = prev_close = env.state._close()
 
     rewards = 0.0
     frame_idx = 0
     strategy_rewards = []
     benchmark_rewards = []
+    have_position = False
 
     while True:
         frame_idx += 1
+        today_close = env.state._close()
         obs_v = torch.tensor([obs]).to(device)
         out_v = net(obs_v)[0]
-        # print(out_v)
+        if frame_idx % 100 == 0:
+            print(out_v)
         action_idx = out_v.max(1)[1].item()
-        # action_idx = agent(obs_v)
         obs, reward, done, _ = env.step(action_idx)
-        rewards += reward
+        # action = environ.Actions(action_idx)
+        # if action == environ.Actions.hold:
+        #     have_position = True
+        # if action == environ.Actions.empty:
+        #     have_position = False
 
+        # if have_position:
+        #     rewards += 100 * (today_close - prev_close) / prev_close
+        # prev_close = today_close
+        rewards += reward
         strategy_rewards.append(rewards)
 
         cur_close = env.state._close()
@@ -64,7 +75,7 @@ if __name__ == '__main__':
             break
 
     file_name = os.path.splitext(os.path.basename(__file__))[0]
-    save_dir = os.path.join('plots', file_name)
+    save_dir = os.path.join('plots', file_name.split('_')[-1])
     os.makedirs(save_dir, exist_ok=True)
 
     save_date = datetime.strftime(datetime.now(), '%m%d-%H%M')
