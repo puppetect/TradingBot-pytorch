@@ -1,5 +1,5 @@
 
-# TradingBot Demo
+# TradingBot-pytorch Demo
 
 ## 目的
 
